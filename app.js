@@ -43,7 +43,7 @@
     try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v === 1) return Object.assign(blankState(), s); } catch (e) { /* пусто */ }
     return blankState();
   }
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { console.error('Прогресс не сохранился', e); } }
+  function save() { MCACHE = new Map(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { console.error('Прогресс не сохранился', e); } }
 
   // ---------- озвучка ----------
   let voices = [];
@@ -142,20 +142,20 @@
     const get = (f) => BUNDLE ? Promise.resolve(BUNDLE.files[f]).then((x) => { if (!x) throw new Error(f); return x; })
       : fetch('content/' + f).then((r) => { if (!r.ok) throw new Error(f); return r.json(); });
     const idx = await get('index.json');
-    const [program, words, errors, modes, calendar, ...files] = await Promise.all([get(idx.program), get(idx.words), get(idx.errors), get(idx.modes), get(idx.calendar), ...idx.lessons.map(get)]);
+    const [program, words, errors, modes, calendar, worldsData, readwords, catalog, week, ...files] = await Promise.all([get(idx.program), get(idx.words), get(idx.errors), get(idx.modes), get(idx.calendar), get(idx.worlds), get(idx.readwords), get(idx.catalog), get(idx.week), ...idx.lessons.map(get)]);
     const lessons = files.flatMap((f) => f.lessons);
     const skills = program.skills;
     const skillById = Object.fromEntries(skills.map((s) => [s.id, s]));
     const wordById = Object.fromEntries(words.words.map((w) => [w.id, w]));
     return { program, tracks: program.tracks, worlds: program.worlds, skills, skillById, lessons, words: words.words, wordById, errors, modes, calendar: calendar.days,
-      config: (BUNDLE && BUNDLE.files['config.json']) || {} };
+      config: (BUNDLE && BUNDLE.files['config.json']) || {}, worldsData, readwords, catalog, week };
   }
   const track = (id) => C.tracks.find((t) => t.id === id) || { id, title: id, emoji: '•', color: '#fff' };
   const skillOf = (l) => C.skillById[l.skill];
 
   // ---------- навыки и доступ ----------
   const sk = (id) => (S.skills[id] = S.skills[id] || { lvl: 0, box: 0, due: '' });
-  const lvl = (id) => { const s = S.skills[id]; if (!s) return 0; return s.manual != null ? s.manual : s.lvl; };
+  const lvl = (id) => { const s = S.skills[id]; if (s && s.manual != null) return s.manual; return mastery(id).lvl; };
   const skillOpen = (s) => S.parent.unlockAll || s.deps.every((d) => lvl(d) >= 3);
   const lessonsOf = (sid) => C.lessons.filter((l) => l.skill === sid);
   const isDone = (l) => !!(S.lessons[l.id] && S.lessons[l.id].done);
@@ -186,6 +186,119 @@
   const dueSkills = () => C.skills.filter((s) => S.skills[s.id] && S.skills[s.id].box > 0 && S.skills[s.id].due <= today());
   const dueWords = () => Object.keys(S.words).filter((id) => C.wordById[id] && S.words[id].box > 0 && S.words[id].due <= today());
 
+  // ---------- освоение навыка: 4 измерения (умение, самостоятельность, сложность, устойчивость) ----------
+  let MCACHE = new Map();
+  const attemptsOf = (id) => S.log.filter((x) => x.skill === id && !x.info);
+  const isOk = (x) => !x.revealed && !x.skipped && (x.wrongs || 0) <= 1;
+  const isIndep = (x) => isOk(x) && !x.wrongs && !x.hints && !(x.help || []).length;
+  function maxDiff(id) {
+    const ls = lessonsOf(id).filter((l) => !l.repeat).length;
+    return Math.max(1, GEN[id] ? 3 : ls);
+  }
+  function mastery(id) {
+    if (MCACHE.has(id)) return MCACHE.get(id);
+    const all = attemptsOf(id), a = all.slice(-6), n = all.length;
+    let m = { n, lvl: 0, enough: n >= 4 };
+    if (n) {
+      const acc = a.filter(isOk).length / a.length, indep = a.filter(isIndep).length / a.length;
+      const byD = {}; all.slice(-24).forEach((x) => (byD[x.d || 1] = byD[x.d || 1] || []).push(x));
+      let diff = 0; for (const [d, xs] of Object.entries(byD)) { const last = xs.slice(-5); if (last.filter(isOk).length / last.length >= 0.8) diff = Math.max(diff, +d); }
+      const stab = (S.skills[id] && S.skills[id].clean) || 0;
+      const transfer = new Set(all.filter(isIndep).map((x) => x.fmt || 'choice')).size >= 2;
+      let lvl = 1;
+      if (acc >= 0.5) lvl = 2;
+      if (acc >= 0.8 && diff >= Math.min(2, maxDiff(id))) lvl = 3;
+      if (lvl >= 3 && indep >= 0.7 && stab >= 1) lvl = 4;
+      if (lvl >= 4 && stab >= 2 && transfer) lvl = 5;
+      m = { n, acc, indep, diff, stab, lvl, enough: n >= 4, transfer };
+    }
+    MCACHE.set(id, m); return m;
+  }
+  const pct = (x) => (x == null ? '—' : Math.round(x * 100) + '%');
+  function masteryVerdict(id) {
+    const m = mastery(id);
+    if (!m.n) return 'ещё не начинали';
+    if (!m.enough) return 'пока недостаточно данных';
+    if (m.acc < 0.5) return 'трудно: нужна практика полегче и проверка базы';
+    if (m.acc < 0.8) return 'учится, нужна ещё практика';
+    if (m.indep < 0.7) return 'получается, но чаще с помощью';
+    if (m.stab < 1) return 'получается сама, ждём проверку повторением';
+    return 'устойчиво';
+  }
+
+  // ---------- генераторы заданий (математика и техника чтения) ----------
+  const rnd = (n) => Math.floor(Math.random() * n);
+  const rint = (a, b) => a + rnd(b - a + 1);
+  const off1 = (ans, extra) => Object.assign({ [ans - 1]: 'off_by_one', [ans + 1]: 'off_by_one' }, extra || {});
+  const plural = (n, f) => { const a = n % 10, b = n % 100; return f[a === 1 && b !== 11 ? 0 : a >= 2 && a <= 4 && (b < 10 || b >= 20) ? 1 : 2]; };
+  function hero() {
+    const H = C.worldsData.heroes; const ids = (S.worlds || []).filter((w) => H[w]);
+    return Math.random() < 0.6 && ids.length ? H[pick(ids)] : H.default; // миры не больше чем в половине с небольшим
+  }
+  const GEN = {
+    'm.compose10': (d) => {
+      const n = d >= 2 ? rint(6, 9) : 10, a = rint(1, n - 1);
+      return { type: 'input', q: `${n} = ${a} + …`, answer: String(n - a), errs: off1(n - a), hints: [`От ${a} досчитай до ${n}. Сколько шагов?`] };
+    },
+    'm.teens': (d) => {
+      const u = rint(1, 9);
+      return Math.random() < 0.5 ? { type: 'input', q: `10 + ${u} = …`, answer: String(10 + u), errs: off1(10 + u, { [u + '1']: 'reversed_digits' }), hints: ['Один десяток и ещё немного. Как называется это число?'] }
+        : { type: 'input', q: `${10 + u} = 10 + …`, answer: String(u), errs: off1(u), hints: [`${10 + u}: десяток и сколько единиц?`] };
+    },
+    'm.add_tens': (d) => {
+      const a = rint(d >= 2 ? 5 : 7, 9), b = rint(11 - a, 9), s = a + b, need = 10 - a;
+      return { type: 'input', q: `${a} + ${b} = …`, answer: String(s), errs: off1(s, { [Math.abs(a - b)]: 'wrong_operation' }),
+        hints: [`До 10 от ${a} не хватает ${need}.`, `${b} это ${need} и ${b - need}. ${a} + ${need} = 10, потом 10 + ${b - need}.`] };
+    },
+    'm.sub_tens': (d) => {
+      const m = rint(11, d >= 2 ? 18 : 15), s = rint(m - 9, 9) , r = m - s, first = m - 10;
+      if (s <= first) return GEN['m.sub_tens'](d);
+      return { type: 'input', q: `${m} − ${s} = …`, answer: String(r), errs: off1(r, { [m + s]: 'wrong_operation' }),
+        hints: [`Сначала отними ${first}, получится 10.`, `Осталось отнять ещё ${s - first}: 10 − ${s - first}.`] };
+    },
+    'm.problems': (d) => {
+      const H = hero(), kind = pick(d >= 2 ? ['add', 'sub', 'cmp'] : ['add', 'sub']);
+      const a = rint(d >= 2 ? 8 : 4, d >= 2 ? 15 : 9), b = rint(2, Math.min(9, a - 1));
+      if (kind === 'add') return { type: 'input', q: 'Сколько стало?', text: `${H.hero}: было ${a} ${plural(a, H.item)}. Потом добавилось ещё ${b}.`, answer: String(a + b),
+        errs: off1(a + b, { [a - b]: 'wrong_operation' }), hints: ['Стало больше или меньше? Значит, плюс или минус?', `${a} + ${b}`] };
+      if (kind === 'sub') return { type: 'input', q: 'Сколько осталось?', text: `${H.hero}: было ${a} ${plural(a, H.item)}. ${b} ${plural(b, H.item)} отдали друзьям.`, answer: String(a - b),
+        errs: off1(a - b, { [a + b]: 'wrong_operation' }), hints: ['Осталось больше или меньше, чем было?', `${a} − ${b}`] };
+      return { type: 'input', q: 'На сколько больше?', text: `У ${H.hero === 'Ника' ? 'Ники' : 'героя'} ${a} ${plural(a, H.item)}, у Луны ${b}. На сколько больше у первого?`, answer: String(a - b),
+        errs: off1(a - b, { [a + b]: 'wrong_operation' }), hints: ['«На сколько больше» это из большего вычесть меньшее.', `${a} − ${b}`] };
+    },
+    'rd.tech': (d) => {
+      const W = C.readwords.words.filter(([w]) => (d === 1 ? w.length <= 4 : d === 2 ? w.length >= 4 && w.length <= 6 : w.length >= 6));
+      const [w, p] = pick(W);
+      const same = C.readwords.words.filter(([x]) => x !== w && x.slice(0, 2) === w.slice(0, 2)); // ловушка: то же начало
+      const other = shuffle(C.readwords.words.filter(([x]) => x !== w && !same.some(([y]) => y === x)));
+      const ds = [...shuffle(same).slice(0, 1).map(([, pp]) => ({ t: pp, err: 'guess_start' })), ...other.slice(0, 3).map(([, pp]) => ({ t: pp, err: 'decoding' }))].slice(0, 2);
+      return { type: 'choice', q: 'Прочитай слово и найди картинку.', text: w, options: shuffle([{ t: p, ok: true }, ...ds]), keepOrder: true,
+        hints: ['Читай по слогам до самого конца слова, не угадывай по началу.'], big: true };
+    }
+  };
+  function practiceSteps(id, n) {
+    const m = mastery(id), md = maxDiff(id);
+    let d = !m.n ? 1 : m.acc < 0.5 ? Math.max(1, (m.diff || 1) - 1) : Math.min(md, (m.diff || 1) + (m.acc >= 0.8 ? 1 : 0));
+    return Array.from({ length: n }, () => Object.assign(GEN[id](d), { d, gen: true }));
+  }
+  function startPractice(id) {
+    const s = C.skillById[id]; if (!s || !GEN[id]) { location.hash = '#/today'; return; }
+    P = { mode: 'practice', lesson: { id: 'practice-' + id, title: 'Тренировка: ' + s.title, skill: id }, skill: id, lang: 'ru', steps: practiceSteps(id, 5), i: 0, t0: Date.now(), wrongs: 0, hints: 0, results: [] };
+    newTask();
+  }
+
+  // ---------- самостоятельность за 14 дней ----------
+  function selfStats() {
+    const since = addDays(-13), ds = Object.entries(S.days).filter(([d, x]) => d >= since && x.started);
+    const n = ds.length, by = ds.filter(([, x]) => x.by === 'kira').length, fin = ds.filter(([, x]) => x.end && !x.refused && !x.timeUp).length;
+    const ref = ds.filter(([, x]) => x.refused).length, extra = ds.filter(([, x]) => x.extraLesson).length;
+    const mins = ds.map(([, x]) => x.end ? Math.round((x.end - x.started) / 60000) : 0).filter(Boolean);
+    const logs = S.log.filter((x) => dstr(new Date(x.t)) >= since && !x.info);
+    const helpAsk = logs.filter((x) => (x.help || []).length).length, hard = logs.filter((x) => x.revealed || x.wrongs >= 2).length;
+    return { days: n, started_self: by, finished: fin, refused: ref, extra, avg_min: mins.length ? Math.round(mins.reduce((a, b) => a + b, 0) / mins.length) : 0,
+      help_asked: helpAsk, hard_tasks: hard };
+  }
+
   // ---------- учебный день: режимы, рабочее время, план, отчёты ----------
   const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
   const modeFor = (d) => S.calendar[d] || (C.calendar[d] && C.calendar[d].mode) || C.modes.week[String(new Date(d + 'T12:00').getDay())] || 'school';
@@ -194,30 +307,66 @@
   const day = () => S.days[today()];
   const minutesSince = (t) => Math.floor((Date.now() - t) / 60000);
 
+  // ---------- адаптивный подбор: что Кире делать дальше и почему ----------
+  const weekFocus = () => (C.week && C.week.focus) || [];
+  const recent = (days) => { const since = addDays(-days); return S.log.filter((x) => !x.info && dstr(new Date(x.t)) >= since); };
+  function continueSkill(s, used, why) {
+    const tid = s.track, m = mastery(s.id);
+    const L = (l, w) => (l && !used.has(l.id) ? (used.add(l.id), { kind: 'lesson', lesson: l.id, title: l.title, track: tid, why: w, done: false }) : null);
+    const Pr = (sk2, w) => (GEN[sk2.id] && !used.has('p:' + sk2.id) ? (used.add('p:' + sk2.id), { kind: 'practice', skill: sk2.id, title: 'Тренировка: ' + sk2.title, track: sk2.track, why: w, done: false }) : null);
+    const own = lessonsOf(s.id).filter((x) => !x.repeat);
+    if (m.enough && m.acc < 0.5) { // правило 2: трудно → база и полегче
+      const dep = s.deps.map((d) => C.skillById[d]).find((d) => d && lvl(d.id) < 3);
+      if (dep) return continueSkill(dep, used, `база для «${s.title}»: сначала укрепляем её`);
+      return Pr(s, 'трудно: тренировка полегче') || L(own.filter(isDone).pop(), 'трудно: повторяем знакомый урок');
+    }
+    return L(own.find((l) => lessonOpen(l) && !isDone(l)), why || 'продолжаем тему') || Pr(s, why || 'закрепляем') || (m.lvl < 3 ? L(own.filter(isDone).pop(), why || 'закрепляем') : null);
+  }
+  function stepFor(tid, used) {
+    const ss = C.skills.filter((s) => s.track === tid && skillOpen(s)).sort((a, b) => PRIO[a.priority] - PRIO[b.priority]);
+    for (const s of ss.filter((x) => weekFocus().includes(x.id))) { const st = continueSkill(s, used, 'фокус недели'); if (st) return st; }
+    for (const s of ss) { const m = mastery(s.id); if (m.n && m.lvl < 3) { const st = continueSkill(s, used); if (st) return st; } }
+    const l = C.lessons.find((x) => !x.repeat && skillOf(x).track === tid && lessonOpen(x) && !isDone(x) && !used.has(x.id));
+    if (l) { used.add(l.id); return { kind: 'lesson', lesson: l.id, title: l.title, track: tid, why: 'новая тема', done: false }; }
+    const weak = ss.filter((s) => GEN[s.id] && !used.has('p:' + s.id)).sort((a, b) => lvl(a.id) - lvl(b.id))[0];
+    if (weak) { used.add('p:' + weak.id); return { kind: 'practice', skill: weak.id, title: 'Тренировка: ' + weak.title, track: tid, why: 'всё пройдено, держим форму', done: false }; }
+    const rep = C.lessons.find((x) => x.repeat && skillOf(x).track === tid && lessonOpen(x) && !used.has(x.id));
+    if (rep) { used.add(rep.id); return { kind: 'lesson', lesson: rep.id, title: rep.title, track: tid, why: 'задание, которое можно делать много раз', done: false }; }
+    return null;
+  }
   function buildDay(mode, energy) {
-    const steps = [], used = new Set(), missing = [];
-    const add = (l) => { if (l && !used.has(l.id)) { used.add(l.id); steps.push({ kind: 'lesson', lesson: l.id, title: l.title, track: skillOf(l).track, done: false }); return true; } return false; };
-    if (dueSkills().length || dueWords().length) steps.push({ kind: 'review', title: 'Вспомним', track: 'review', done: false });
-    if (energy === 'tired') { // устала: повторение и одно лёгкое
-      if (steps.length < 1) add(nextInTrack('english') || nextInTrack('logic'));
-      return { steps, missing };
+    const steps = [], used = new Set(), missing = [], notes = [];
+    const push = (st) => { if (st) steps.push(st); return !!st; };
+    if (dueSkills().length || dueWords().length) steps.push({ kind: 'review', title: 'Вспомним', track: 'review', why: 'подошёл срок повторения', done: false });
+    // правило 4: часто просит прочитать за неё → техника чтения
+    const r7 = recent(7), readHelp = r7.filter((x) => (x.help || []).includes('reading')).length;
+    if (r7.length >= 8 && readHelp / r7.length > 0.3 && skillOpen(C.skillById['rd.tech'])) { used.add('p:rd.tech'); steps.push({ kind: 'practice', skill: 'rd.tech', title: 'Тренировка: читаю слово точно', track: 'reading', why: `часто просит прочитать за неё (${readHelp} из ${r7.length})`, done: false }); }
+    // правило 3: не понимает условие задач → понимание предложения
+    const cond = r7.filter((x) => x.skill === 'm.problems' && ((x.help || []).includes('instruction') || x.cond)).length;
+    if (cond >= 2) { const s = C.skillById['rd.sentence']; push(continueSkill(s, used, 'в задачах трудно понять условие: тренируем понимание предложения')); }
+    // правило 5: устала два дня подряд или отказ → меньше
+    const tiredDays = [1, 2].filter((k) => { const x = S.days[addDays(-k)]; return x && (x.energy === 'tired' || x.refused); }).length;
+    if (energy === 'tired') { if (steps.length < 1) push(stepFor('english', used) || stepFor('logic', used)); return { steps: steps.slice(0, 2), missing, notes: ['устала: только повторение и одно лёгкое'] }; }
+    const plan = modeInfo(mode).plan;
+    const pref = [['reading', 'math', 'russian'], ['math', 'reading', 'russian'], ['russian', 'reading', 'math']][new Date().getDay() % 3];
+    for (const slot of plan) {
+      if (slot === 'break' || slot === 'move') { if (steps.length && steps[steps.length - 1].kind !== 'break') steps.push({ kind: 'break', title: 'Разминка', track: 'break', move: pick(C.modes.moves || ['Встань, потянись, попей воды']), done: false }); continue; }
+      if (slot === 'main') { pref.some((t) => push(stepFor(t, used))); continue; }
+      const tid = slot === 'rotate' ? C.modes.rotate[Math.floor(Date.now() / 6048e5) % C.modes.rotate.length] : slot;
+      if (!push(stepFor(tid, used))) missing.push(track(tid).title);
     }
-    for (const slot of modeInfo(mode).plan) {
-      if (slot === 'break') { if (steps.length && steps[steps.length - 1].kind !== 'break') steps.push({ kind: 'break', title: 'Перерыв 5 минут', track: 'break', done: false }); continue; }
-      const ok = slot === 'main' ? add(mainPick()) : add(nextInTrack(slot));
-      if (!ok && slot !== 'main') missing.push(track(slot).title);
-    }
+    // правило 6: ей интересно → ветка интереса (если сама брала «ещё одну» по этому предмету 2 раза за 2 недели)
+    const ext = {}; Object.entries(S.days).filter(([d]) => d >= addDays(-14)).forEach(([, x]) => { if (x.extraLesson) { const l = C.lessons.find((y) => y.id === x.extraLesson); if (l) ext[skillOf(l).track] = (ext[skillOf(l).track] || 0) + 1; } });
+    const fav = Object.entries(ext).find(([, n]) => n >= 2);
+    if (fav && mode === 'full') { const st = stepFor(fav[0], used); if (st) { st.why = 'ей интересно: сама выбирала это сверху'; steps.push(st); } }
     while (steps.length && steps[steps.length - 1].kind === 'break') steps.pop();
-    if (energy === 'meh') { // так себе: не больше двух шагов, без перерывов
-      const keep = steps.filter((x) => x.kind !== 'break').slice(0, 2);
-      return { steps: keep, missing };
-    }
-    return { steps, missing };
+    if (energy === 'meh' || tiredDays >= 2) { notes.push(energy === 'meh' ? 'так себе: без лишнего' : 'устала два дня подряд: объём меньше'); return { steps: steps.filter((x) => x.kind !== 'break').slice(0, 2), missing, notes }; }
+    return { steps, missing, notes };
   }
   const nextStepOf = (dy) => dy.steps.find((x) => !x.done);
   function markStepDone(kind, lessonId) {
     const dy = day(); if (!dy || !dy.steps) return;
-    const st = dy.steps.find((x) => !x.done && x.kind === kind && (kind !== 'lesson' || x.lesson === lessonId));
+    const st = dy.steps.find((x) => !x.done && x.kind === kind && (kind === 'review' || x.lesson === lessonId || x.skill === lessonId));
     if (st) { st.done = true; st.at = Date.now(); }
     if (dy.extraLesson && dy.extraLesson === lessonId) { dy.extraDone = true; enqueueReport(today()); }
     save();
@@ -245,7 +394,9 @@
     }
     const mins = dy.started ? Math.round(((dy.end || Date.now()) - dy.started) / 60000) : 0;
     return { v: 1, kind: 'daily', date: d, sent: new Date().toISOString(), mode: dy.mode || modeFor(d), started_by: dy.by || null, energy: dy.energy || null,
-      minutes: mins, time_up: !!dy.timeUp, steps: (dy.steps || []).map((x) => ({ title: x.title, track: x.track, done: !!x.done })), missing: dy.missing || [],
+      minutes: mins, time_up: !!dy.timeUp, steps: (dy.steps || []).map((x) => ({ title: x.title, track: x.track, done: !!x.done, why: x.why || '' })), missing: dy.missing || [], notes: dy.notes || [],
+      mastery: C.skills.filter((s) => mastery(s.id).n).map((s) => { const m = mastery(s.id); return { id: s.id, title: s.title, track: s.track, priority: s.priority, n: m.n, acc: m.acc, indep: m.indep, diff: m.diff, stab: m.stab, lvl: lvl(s.id), verdict: masteryVerdict(s.id) }; }),
+      self: selfStats(), focus: weekFocus(),
       extra: dy.extraLesson ? { lesson: dy.extraLesson, done: !!dy.extraDone } : null, refused: dy.refused || null,
       lessons: Object.values(byLesson), errors_legend: C.errors, words_in_work: Object.keys(S.words).length };
   }
@@ -374,15 +525,15 @@
     // план дня
     const nx = nextStepOf(dy);
     const mins = minutesSince(dy.started);
-    const icon = { review: '🔁', break: '🧃', reading: '📖', math: '🔢', russian: '✏️', words: '🔤', english: '🎧', world: '🌍', logic: '🧩', create: '🎨', homework: '📷' };
+    const icon = { review: '🔁', break: '🤸', explore: '🔭', code: '🤖', music: '🎵', feelings: '💛', reading: '📖', math: '🔢', russian: '✏️', words: '🔤', english: '🎧', world: '🌍', logic: '🧩', create: '🎨', homework: '📷' };
     let list = dy.steps.map((x) => `<div class="skill" style="${x === nx ? 'outline:4px solid var(--violet)' : ''}"><div class="lv">${x.done ? '✅' : icon[x.track] || '•'}</div>
       <div><div>${esc(x.title)}</div><div class="st">${x.done ? 'готово' : x === nx ? 'сейчас' : 'потом'}</div></div></div>`).join('');
     let go = '';
     if (nx) {
-      if (nx.kind === 'break') go = `<button class="btn green" data-act="breakdone">🧃 Отдохнула, дальше</button>`;
+      if (nx.kind === 'break') go = `<button class="btn green" data-act="breakdone">🤸 Сделала, дальше</button>`;
       else go = `<button class="btn" data-act="nextstep">Дальше: ${esc(nx.title)}</button>`;
     }
-    const brk = nx && nx.kind === 'break' ? bubble('luna', 'happy', 'Перерыв. Встань, потянись, попей воды. 5 минут, и дальше.') : '';
+    const brk = nx && nx.kind === 'break' ? bubble('luna', 'happy', `Разминка! ${esc(nx.move || 'Встань и потянись.')} Потом попей воды.`) : '';
     return shell('today', `${chip}<div class="row" style="justify-content:space-between"><h1>Сегодня</h1><span class="tag green">⏱ ${mins} из ${modeInfo(dy.mode).minutes} мин</span></div>
       ${brk}${momNote}<div style="max-width:720px">${list}</div><div class="pfoot">${go}</div>
       <div class="pfoot"><button class="btn soft small" data-go="#/nowant">Сегодня не хочу</button></div>`);
@@ -541,13 +692,16 @@
     const l = C.lessons.find((x) => x.id === id);
     if (!l || !lessonOpen(l)) { location.hash = '#/map/' + (l ? skillOf(l).track : ''); return; }
     const s = sk(l.skill); if (s.lvl < 1) { s.lvl = 1; save(); }
-    P = { mode: 'lesson', lesson: l, lang: l.lang || 'ru', steps: expandSteps(l.steps), i: 0, t0: Date.now(), wrongs: 0, hints: 0, results: [] };
+    const order = lessonsOf(l.skill).filter((x) => !x.repeat);
+    P = { mode: 'lesson', lesson: l, lang: l.lang || 'ru', steps: expandSteps(l.steps), i: 0, t0: Date.now(), wrongs: 0, hints: 0, results: [], diff: l.d || Math.max(1, order.indexOf(l) + 1) };
     newTask();
   }
   function startReview() {
     const steps = [];
     for (const s of dueSkills().slice(0, 2)) {
-      const pool = lessonsOf(s.id).filter(isDone).flatMap((l) => l.steps.filter((t) => ['choice', 'input', 'order', 'match'].includes(t.type)).map((t) => Object.assign({}, t, { reviewSkill: s.id, lang: t.lang || l.lang })));
+      const order = lessonsOf(s.id).filter((x) => !x.repeat);
+      const pool = lessonsOf(s.id).filter(isDone).flatMap((l) => l.steps.filter((t) => ['choice', 'input', 'order', 'match'].includes(t.type)).map((t) => Object.assign({}, t, { reviewSkill: s.id, lang: t.lang || l.lang, d: t.d || Math.max(1, order.indexOf(l) + 1) })));
+      if (GEN[s.id]) pool.push(...practiceSteps(s.id, 2).map((t) => Object.assign(t, { reviewSkill: s.id }))); // новые числа, не заученные ответы
       steps.push(...shuffle(pool).slice(0, 2));
     }
     for (const id of shuffle(dueWords()).slice(0, 5)) {
@@ -562,7 +716,7 @@
   function newTask() {
     const t = P.steps[P.i];
     P.ts = { wrongs: 0, hints: 0, revealed: false, solved: false, errs: [], listenedAfterWrong: false, input: '', wrongOpts: [], ans: [], pool: [], fixed: 0, matched: [], sel: null,
-      help: [], audioOn: false, syllOn: false, menu: false, instr: null, wordHelp: null };
+      help: [], audioOn: false, syllOn: false, menu: false, instr: null, wordHelp: null, t0: Date.now() };
     if (t.type === 'order') P.ts.pool = shuffle(t.items.map((x, i) => ({ x, i })));
     if (t.type === 'choice') P.ts.opts = t.keepOrder ? t.options : shuffle(t.options);
     if (t.type === 'match') { P.ts.left = shuffle(t.pairs.map((p, i) => ({ x: p[0], i }))); P.ts.right = shuffle(t.pairs.map((p, i) => ({ x: p[1], i }))); }
@@ -589,7 +743,7 @@
       body += `<div class="tag">Послушай</div><div class="reading">${sayBtn(t.text, 'ru', 'say')}${rich(t.text)}</div>`;
     } else {
       if (t.q) body += `<p class="q">${rich(t.q, t.qLang)} ${ts.audioOn ? sayBtn(t.q, t.qLang || 'ru') : ''}</p>`;
-      if (t.text) body += `<div class="reading">${ts.audioOn ? sayBtn(t.text, lang, 'say') : ''}${rich(t.text, lang)}</div>`;
+      if (t.text) body += `<div class="reading" ${t.big ? 'style="font-size:56px;text-align:center;letter-spacing:.04em"' : ''}>${ts.audioOn ? sayBtn(t.text, lang, 'say') : ''}${rich(t.text, lang)}</div>`;
       if (t.img) body += `<img class="pic-img" src="${esc(src(t.img))}" alt="">`;
       if (t.pic) body += `<div class="pic-big">${esc(t.pic)}</div>`;
       if (t.audio) body += `<p>${sayBtn(t.audio, lang, 'big')} <span class="listen muted">Нажми и послушай</span></p>`;
@@ -679,8 +833,9 @@
   }
   function solved() {
     const t = P.steps[P.i], ts = P.ts; ts.solved = true;
-    P.results.push({ t: Date.now(), lesson: P.lesson.id, skill: P.mode === 'lesson' ? P.lesson.skill : t.reviewSkill || null, word: t.wordRef || t.reviewWord || null, step: P.i,
-      wrongs: ts.wrongs, hints: ts.hints, revealed: ts.revealed, cond: ts.listenedAfterWrong, errs: ts.errs, review: P.mode === 'review', help: ts.help, audio: ts.audioOn });
+    P.results.push({ t: Date.now(), lesson: P.lesson.id, skill: P.mode === 'lesson' || P.mode === 'practice' ? P.lesson.skill : t.reviewSkill || null, word: t.wordRef || t.reviewWord || null, step: P.i,
+      wrongs: ts.wrongs, hints: ts.hints, revealed: ts.revealed, cond: ts.listenedAfterWrong, errs: ts.errs, review: P.mode === 'review', help: ts.help, audio: ts.audioOn,
+      d: t.d || P.diff || 1, fmt: t.type, ms: Date.now() - (ts.t0 || Date.now()), gen: !!t.gen });
     const msg = ts.revealed || ts.hints ? pick(PRAISE_HINT) : ts.wrongs ? pick(PRAISE_RETRY) : pick(PRAISE_CLEAN);
     renderPlayer(`<div class="feedback"><div class="in">${Chars.html('nika', 'proud', 'sm')}<div class="msg">${esc(msg)}${t.why ? `<div class="why">${rich(t.why)}</div>` : ''}</div>
       <button class="btn green" data-act="next" autofocus>Дальше</button></div></div>`);
@@ -694,22 +849,22 @@
   }
   function finish() {
     const r = P.results; const ms = Date.now() - P.t0;
+    const before = P.lesson.skill ? lvl(P.lesson.skill) : 0;
     S.log.push(...r); if (S.log.length > 3000) S.log = S.log.slice(-3000);
+    MCACHE = new Map();
     S.sessions.push({ d: today(), id: P.lesson.id, ms });
     let lines = '';
-    if (P.mode === 'lesson') {
-      const l = P.lesson, s = sk(l.skill), before = lvl(l.skill);
-      const checked = r.length || 1, bad = r.filter((x) => x.revealed || x.wrongs > 1).length;
-      const good = bad <= Math.floor(checked / 3) && P.hints <= Math.max(2, Math.floor(checked / 2));
-      s.lvl = Math.max(s.lvl, good ? 3 : 2);
-      const prev = S.lessons[l.id] || { times: 0 };
-      S.lessons[l.id] = { done: true, at: today(), times: prev.times + 1, wrongs: P.wrongs, hints: P.hints };
-      const allDone = lessonsOf(l.skill).filter((x) => !x.repeat).every(isDone);
-      if (allDone && s.box === 0 && !l.repeat) { s.box = 1; s.due = addDays(BOX_DAYS[1]); }
-      for (const st of l.steps) if (st.type === 'words') for (const id of st.ids) if (!S.words[id]) S.words[id] = { box: 1, due: addDays(1) };
-      const after = lvl(l.skill);
-      lines = `<div class="lvchange">${esc(C.skillById[l.skill].title)}: <span class="big">${LV[Math.max(1, before)]}</span> ➜ <span class="big">${LV[after]}</span></div>
-        <p class="sub">${esc(LVT[after])}${s.box ? ` · вспомним ${fmtDay(s.due)}` : ''}</p>`;
+    if (P.mode === 'lesson' || P.mode === 'practice') {
+      const id = P.lesson.skill, s = sk(id);
+      if (P.mode === 'lesson') {
+        const l = P.lesson, prev = S.lessons[l.id] || { times: 0 };
+        S.lessons[l.id] = { done: true, at: today(), times: prev.times + 1, wrongs: P.wrongs, hints: P.hints };
+        for (const st of l.steps) if (st.type === 'words') for (const w of st.ids) if (!S.words[w]) S.words[w] = { box: 1, due: addDays(1) };
+      }
+      const after = lvl(id);
+      if (after >= 3 && !s.box) { s.box = 1; s.due = addDays(BOX_DAYS[1]); } // получается: ставим в повторение
+      lines = `<div class="lvchange">${esc(C.skillById[id].title)}: <span class="big">${LV[Math.max(1, before)]}</span> ➜ <span class="big">${LV[Math.max(1, after)]}</span></div>
+        <p class="sub">${esc(LVT[Math.max(1, after)])}${s.box ? ` · вспомним ${fmtDay(s.due)}` : ''}</p>`;
     } else {
       const bySkill = {};
       for (const x of r) {
@@ -718,8 +873,8 @@
       }
       for (const [id, ok] of Object.entries(bySkill)) {
         const s = sk(id);
-        if (ok) { s.box = Math.min(4, s.box + 1); if (s.box >= 3) s.lvl = Math.max(s.lvl, 4); if (s.box >= 4) s.lvl = 5; }
-        else { s.box = 1; s.lvl = Math.max(2, Math.min(s.lvl, 3)); }
+        if (ok) { s.box = Math.min(4, s.box + 1); s.clean = (s.clean || 0) + 1; } // устойчивость: чистые повторения
+        else s.box = 1;
         s.due = addDays(BOX_DAYS[s.box]);
       }
       lines = `<p class="sub">Повторение помогает помнить долго. Следующее будет, когда придёт время.</p>`;
@@ -727,6 +882,7 @@
     save();
     if (P.mode === 'lesson') markStepDone('lesson', P.lesson.id);
     if (P.mode === 'review') markStepDone('review');
+    if (P.mode === 'practice') markStepDone('practice', P.lesson.skill);
     if (P.mode === 'mini') { // «не хочу»: самое лёгкое сделано, день закрыт без упрёка
       const d = today(), dy = S.days[d] || (S.days[d] = { mode: modeFor(d), started: Date.now(), by: 'kira' });
       dy.refused = { reason: dy.refuseReason || null, choice: P.lesson.id.replace('mini-', '') };
@@ -772,7 +928,7 @@
         if (ok) solved(); else { const e = (t.errs && t.errs[ts.input]) || 'calc'; ts.input = ''; wrong(e); }
       }
       if (t.type === 'order') {
-        let k = 0; while (k < ts.ans.length && ts.ans[k].i === k) k++;
+        let k = 0; while (k < ts.ans.length && ts.ans[k].x === t.items[k]) k++;
         if (k === t.items.length) solved();
         else { ts.fixed = k; ts.pool.push(...ts.ans.splice(k)); ts.pool = shuffle(ts.pool); wrong(t.err || 'order'); }
       }
@@ -797,7 +953,7 @@
     if (act === 'next') { nextStep(); return; }
     if (act === 'skip') {
       P.results.push({ t: Date.now(), lesson: P.lesson.id, skill: P.mode === 'lesson' ? P.lesson.skill : t.reviewSkill || null, step: P.i,
-        wrongs: ts.wrongs, hints: ts.hints, revealed: true, skipped: true, errs: ts.errs, help: ts.help, audio: ts.audioOn });
+        wrongs: ts.wrongs, hints: ts.hints, revealed: true, skipped: true, errs: ts.errs, help: ts.help, audio: ts.audioOn, d: t.d || P.diff || 1, fmt: t.type });
       nextStep(); return;
     }
     if (act === 'exit') { if (confirm('Выйти из урока? Прогресс этого урока не сохранится.')) { P = null; location.hash = '#/today'; } return; }
@@ -837,19 +993,31 @@
       <div class="row" style="margin-top:8px"><button class="btn small" data-act="sendreport">📤 Отправить отчёт за сегодня</button><button class="btn soft small" data-act="savereport">💾 Сохранить отчёт файлом</button></div>
       <p class="muted small">В очереди: ${S.outbox.length}. Последняя отправка: ${S.lastSend ? new Date(S.lastSend).toLocaleString('ru-RU') : 'ещё не было'}. ${C.config.reports ? '' : 'Почтовый ящик пока не подключён: отчёты копятся здесь и уйдут, когда подключим.'}</p></div>`;
 
-    // где трудно
-    h += '<h2>Где трудно</h2><div class="card"><table class="ptable"><tr><th>Навык</th><th>Заданий</th><th>Чисто</th><th>Случайная</th><th>Не поняла условие</th><th>Слишком сложно</th><th>Повторяющиеся ошибки</th></tr>';
-    for (const s of C.skills) {
-      const rs = S.log.filter((x) => x.skill === s.id); if (!rs.length) continue;
-      const clean = rs.filter((x) => !x.wrongs && !x.hints).length;
-      const rnd = rs.filter((x) => x.wrongs === 1 && !x.hints && !x.revealed).length;
-      const cond = rs.filter((x) => x.cond && !x.revealed).length;
-      const hard = rs.filter((x) => x.revealed).length;
-      const cnt = {}; rs.flatMap((x) => x.errs || []).forEach((e) => (cnt[e] = (cnt[e] || 0) + 1));
-      const rule = Object.entries(cnt).filter(([, n]) => n >= 2).map(([e, n]) => `${errName(e)} ×${n}`).join('; ');
-      h += `<tr><td>${esc(s.title)}</td><td>${rs.length}</td><td>${clean}</td><td>${rnd}</td><td>${cond}</td><td>${hard}</td><td>${esc(rule || 'нет')}</td></tr>`;
+    // самостоятельность: главная цель первых трёх месяцев
+    const ss = selfStats();
+    h += `<h2>Самостоятельность (14 дней)</h2><div class="cards">
+      <div class="card"><div class="tag green">Начала сама</div><div style="font-size:34px;font-weight:900">${ss.started_self} из ${ss.days}</div><div class="muted small">дней с рабочим временем</div></div>
+      <div class="card"><div class="tag">Довела до конца</div><div style="font-size:34px;font-weight:900">${ss.finished}</div><div class="muted small">без отказа и без «время вышло»</div></div>
+      <div class="card"><div class="tag yellow">Просила помощь</div><div style="font-size:34px;font-weight:900">${ss.help_asked}</div><div class="muted small">раз через «Мне трудно» (это хорошо: не отказ)</div></div>
+      <div class="card"><div class="tag">Отказы · сверху</div><div style="font-size:34px;font-weight:900">${ss.refused} · ${ss.extra}</div><div class="muted small">«не хочу» и «ещё одна» по желанию</div></div></div>`;
+
+    // освоение навыков: 4 измерения и вывод
+    h += `<h2>Навыки: где Кира сейчас</h2><div class="card"><table class="ptable"><tr><th>Навык</th><th>Попыток</th><th>Умение</th><th>Сама</th><th>Сложность</th><th>Повторения</th><th>Вывод</th><th>Частые ошибки</th></tr>`;
+    for (const sk2 of C.skills) {
+      const m = mastery(sk2.id); if (!m.n) continue;
+      const cnt = {}; attemptsOf(sk2.id).slice(-12).flatMap((x) => x.errs || []).forEach((e) => (cnt[e] = (cnt[e] || 0) + 1));
+      const top = Object.entries(cnt).filter(([, n]) => n >= 2).sort((x, y) => y[1] - x[1]).slice(0, 2).map(([e2, n]) => `${errName(e2)} ×${n}`).join('; ');
+      h += `<tr><td>${LV[Math.max(1, lvl(sk2.id))]} ${esc(sk2.title)}</td><td>${m.n}</td><td>${pct(m.acc)}</td><td>${pct(m.indep)}</td><td>${m.diff || 0} из ${maxDiff(sk2.id)}</td><td>${m.stab}</td><td>${esc(masteryVerdict(sk2.id))}</td><td class="small">${esc(top || 'нет')}</td></tr>`;
     }
-    h += '</table><p class="muted small">Случайная: одна ошибка, потом верно. Не поняла условие: после прослушивания ответила верно. Слишком сложно: дошла до показа ответа. Повторяющиеся: одна и та же ошибка 2 раза и больше, значит не понято правило.</p></div>';
+    h += `</table><p class="muted small">Умение: верные ответы в последних 6 заданиях. Сама: без подсказок, озвучки и ошибок. Сложность: самый трудный уровень, где получается 80%. Повторения: сколько раз чисто вспомнила через несколько дней. Меньше 4 попыток: выводов не делаем.</p></div>`;
+
+    // покрытие карты навыков
+    h += '<h2>Карта навыков: что уже есть в программе</h2><div class="card">';
+    for (const ar of C.catalog.areas) {
+      const items = ar.items.map(([code, title, cov]) => { const has = cov.some((c) => c === 'self' || c === 'help' || lessonsOf(c).length || GEN[c]); return `<span class="tag ${has ? 'green' : ''}" title="${esc(title)}">${has ? '✓' : '○'} ${esc(code)} ${esc(title)}</span>`; }).join(' ');
+      h += `<div style="margin-bottom:12px"><b>${esc(ar.area)}</b><div>${items}</div></div>`;
+    }
+    h += '<p class="muted small">✓ есть задания, ○ пока нет. Недостающее добавляет Claude пачками заданий.</p></div>';
 
     // навыки
     h += `<h2>Навыки</h2><div class="card"><label class="row small"><input type="checkbox" data-act="unlock" ${S.parent.unlockAll ? 'checked' : ''}> Открыть все уроки без очереди</label>
@@ -888,6 +1056,7 @@
     if (page !== 'parent') parentOk = false;
     if (page === 'lesson') { startLesson(arg); return; }
     if (page === 'review') { startReview(); return; }
+    if (page === 'practice') { startPractice(arg); return; }
     P = null;
     const views = { today: viewToday, nowant: viewNoWant, map: () => viewMap(arg), skills: viewSkills, homework: viewHomework, parent: viewParent };
     app.innerHTML = (views[page] || viewToday)();
@@ -911,11 +1080,11 @@
     }
     if (el.dataset.energy) {
       const dy = S.days[d]; dy.energy = el.dataset.energy;
-      const b = buildDay(dy.mode, dy.energy); dy.steps = b.steps; dy.missing = b.missing; save(); route(); return;
+      const b = buildDay(dy.mode, dy.energy); dy.steps = b.steps; dy.missing = b.missing; dy.notes = b.notes; save(); route(); return;
     }
     if (el.dataset.act === 'nextstep') {
       const nx = nextStepOf(S.days[d]); if (!nx) { route(); return; }
-      location.hash = nx.kind === 'review' ? '#/review' : '#/lesson/' + nx.lesson; return;
+      location.hash = nx.kind === 'review' ? '#/review' : nx.kind === 'practice' ? '#/practice/' + nx.skill : '#/lesson/' + nx.lesson; return;
     }
     if (el.dataset.act === 'breakdone') { const nx = nextStepOf(S.days[d]); if (nx) { nx.done = true; nx.at = Date.now(); } save(); route(); return; }
     if (el.dataset.extra) {
