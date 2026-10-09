@@ -8,7 +8,10 @@
   const BOX_DAYS = [0, 1, 3, 7, 21]; // коробки повторения: завтра, 3 дня, неделя, 3 недели
   const PRIO = { red: 0, yellow: 1, green: 2 };
   const HINT_LABELS = ['Скажу проще', 'Подсказка', 'Пример', 'По шагам', 'Попробуй полегче'];
-  const GENERIC_HINTS = ['Прочитай задание ещё раз. Можно нажать 🔊, и я прочитаю.', 'Ответ прячется в тексте или на картинке. Найди нужное место пальцем.'];
+  const GENERIC_HINTS = ['Прочитай задание ещё раз медленно, по слогам.', 'Ответ прячется в тексте или на картинке. Найди нужное место пальцем.'];
+  const INSTR = { choice: 'Прочитай вопрос. Потом нажми на один ответ из кнопок ниже.', input: 'Посчитай и набери ответ на кнопках с цифрами. Потом нажми «Проверить».',
+    order: 'Нажимай на карточки по порядку: сначала то, что было первым. Потом «Проверить».', match: 'Нажми на карточку слева, потом на её пару справа.',
+    say: 'Скажи ответ вслух маме или себе. Потом нажми зелёную кнопку.', info: 'Прочитай и нажми «Дальше».', word: 'Прочитай новое слово и что оно значит. Потом «Дальше».', listen: 'Послушай историю до конца.' };
 
   let C = null;   // контент
   let S = null;   // состояние (прогресс)
@@ -33,13 +36,14 @@
 
   function blankState() {
     return { v: 1, name: '', worlds: [], skills: {}, lessons: {}, words: {}, log: [], sessions: [],
-      parent: { pin: '', comment: '', notes: '', unlockAll: false }, set: { syll: false } };
+      parent: { pin: '', comment: '', notes: '', unlockAll: false }, set: { syll: false },
+      days: {}, calendar: {}, outbox: [], lastSend: null };
   }
   function load() {
     try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v === 1) return Object.assign(blankState(), s); } catch (e) { /* пусто */ }
     return blankState();
   }
-  function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* хранилище недоступно */ } }
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { console.error('Прогресс не сохранился', e); } }
 
   // ---------- озвучка ----------
   let voices = [];
@@ -82,7 +86,8 @@
   }
   function rich(text, lang) {
     const t = esc(text).replace(/\n/g, '<br>');
-    if (!S.set.syll || lang === 'en') return t;
+    const on = S.set.syll || (P && P.ts && P.ts.syllOn);
+    if (!on || lang === 'en') return t;
     return t.replace(/[А-Яа-яЁё]+/g, (w) => sylls(w).map((s, i) => `<span class="s${i % 2}">${s}</span>`).join(''));
   }
   const sayBtn = (text, lang, cls) => `<button class="say-btn ${cls || ''}" data-say="${esc(text)}" data-lang="${lang || 'ru'}" aria-label="Прослушать">🔊</button>`;
@@ -137,12 +142,13 @@
     const get = (f) => BUNDLE ? Promise.resolve(BUNDLE.files[f]).then((x) => { if (!x) throw new Error(f); return x; })
       : fetch('content/' + f).then((r) => { if (!r.ok) throw new Error(f); return r.json(); });
     const idx = await get('index.json');
-    const [program, words, errors, ...files] = await Promise.all([get(idx.program), get(idx.words), get(idx.errors), ...idx.lessons.map(get)]);
+    const [program, words, errors, modes, calendar, ...files] = await Promise.all([get(idx.program), get(idx.words), get(idx.errors), get(idx.modes), get(idx.calendar), ...idx.lessons.map(get)]);
     const lessons = files.flatMap((f) => f.lessons);
     const skills = program.skills;
     const skillById = Object.fromEntries(skills.map((s) => [s.id, s]));
     const wordById = Object.fromEntries(words.words.map((w) => [w.id, w]));
-    return { program, tracks: program.tracks, worlds: program.worlds, skills, skillById, lessons, words: words.words, wordById, errors };
+    return { program, tracks: program.tracks, worlds: program.worlds, skills, skillById, lessons, words: words.words, wordById, errors, modes, calendar: calendar.days,
+      config: (BUNDLE && BUNDLE.files['config.json']) || {} };
   }
   const track = (id) => C.tracks.find((t) => t.id === id) || { id, title: id, emoji: '•', color: '#fff' };
   const skillOf = (l) => C.skillById[l.skill];
@@ -180,6 +186,122 @@
   const dueSkills = () => C.skills.filter((s) => S.skills[s.id] && S.skills[s.id].box > 0 && S.skills[s.id].due <= today());
   const dueWords = () => Object.keys(S.words).filter((id) => C.wordById[id] && S.words[id].box > 0 && S.words[id].due <= today());
 
+  // ---------- учебный день: режимы, рабочее время, план, отчёты ----------
+  const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+  const modeFor = (d) => S.calendar[d] || (C.calendar[d] && C.calendar[d].mode) || C.modes.week[String(new Date(d + 'T12:00').getDay())] || 'school';
+  const modeInfo = (m) => C.modes.modes[m] || C.modes.modes.school;
+  const dayNote = (d) => (C.calendar[d] && C.calendar[d].note) || '';
+  const day = () => S.days[today()];
+  const minutesSince = (t) => Math.floor((Date.now() - t) / 60000);
+
+  function buildDay(mode, energy) {
+    const steps = [], used = new Set(), missing = [];
+    const add = (l) => { if (l && !used.has(l.id)) { used.add(l.id); steps.push({ kind: 'lesson', lesson: l.id, title: l.title, track: skillOf(l).track, done: false }); return true; } return false; };
+    if (dueSkills().length || dueWords().length) steps.push({ kind: 'review', title: 'Вспомним', track: 'review', done: false });
+    if (energy === 'tired') { // устала: повторение и одно лёгкое
+      if (steps.length < 1) add(nextInTrack('english') || nextInTrack('logic'));
+      return { steps, missing };
+    }
+    for (const slot of modeInfo(mode).plan) {
+      if (slot === 'break') { if (steps.length && steps[steps.length - 1].kind !== 'break') steps.push({ kind: 'break', title: 'Перерыв 5 минут', track: 'break', done: false }); continue; }
+      const ok = slot === 'main' ? add(mainPick()) : add(nextInTrack(slot));
+      if (!ok && slot !== 'main') missing.push(track(slot).title);
+    }
+    while (steps.length && steps[steps.length - 1].kind === 'break') steps.pop();
+    if (energy === 'meh') { // так себе: не больше двух шагов, без перерывов
+      const keep = steps.filter((x) => x.kind !== 'break').slice(0, 2);
+      return { steps: keep, missing };
+    }
+    return { steps, missing };
+  }
+  const nextStepOf = (dy) => dy.steps.find((x) => !x.done);
+  function markStepDone(kind, lessonId) {
+    const dy = day(); if (!dy || !dy.steps) return;
+    const st = dy.steps.find((x) => !x.done && x.kind === kind && (kind !== 'lesson' || x.lesson === lessonId));
+    if (st) { st.done = true; st.at = Date.now(); }
+    if (dy.extraLesson && dy.extraLesson === lessonId) { dy.extraDone = true; enqueueReport(today()); }
+    save();
+  }
+  function closeDayIfNeeded() {
+    const dy = day(); if (!dy || !dy.started || dy.end || !dy.steps) return;
+    const allDone = dy.steps.every((x) => x.done);
+    const cap = modeInfo(dy.mode).minutes;
+    const timeUp = cap && minutesSince(dy.started) >= cap && dy.steps.some((x) => x.done);
+    if (allDone || timeUp) { dy.end = Date.now(); dy.timeUp = !allDone; save(); enqueueReport(today()); }
+  }
+
+  // отчёт за день: из журнала событий
+  function dayReport(d) {
+    const dy = S.days[d] || {};
+    const logs = S.log.filter((x) => dstr(new Date(x.t)) === d);
+    const byLesson = {};
+    for (const x of logs) {
+      const k = x.lesson; const L = byLesson[k] = byLesson[k] || { lesson: k, title: (C.lessons.find((l) => l.id === k) || { title: k === 'review' ? 'Повторение' : k }).title, skill: x.skill, tasks: 0, clean: 0, hints: 0, revealed: 0, help: {}, errs: {} };
+      if (x.info) { (x.help || []).forEach((h) => (L.help[h] = (L.help[h] || 0) + 1)); continue; }
+      L.tasks++; if (!x.wrongs && !x.hints && !(x.help || []).length) L.clean++;
+      L.hints += x.hints || 0; if (x.revealed) L.revealed++;
+      (x.help || []).forEach((h) => (L.help[h] = (L.help[h] || 0) + 1));
+      (x.errs || []).forEach((e) => (L.errs[e] = (L.errs[e] || 0) + 1));
+    }
+    const mins = dy.started ? Math.round(((dy.end || Date.now()) - dy.started) / 60000) : 0;
+    return { v: 1, kind: 'daily', date: d, sent: new Date().toISOString(), mode: dy.mode || modeFor(d), started_by: dy.by || null, energy: dy.energy || null,
+      minutes: mins, time_up: !!dy.timeUp, steps: (dy.steps || []).map((x) => ({ title: x.title, track: x.track, done: !!x.done })), missing: dy.missing || [],
+      extra: dy.extraLesson ? { lesson: dy.extraLesson, done: !!dy.extraDone } : null, refused: dy.refused || null,
+      lessons: Object.values(byLesson), errors_legend: C.errors, words_in_work: Object.keys(S.words).length };
+  }
+  function enqueueReport(d) {
+    const now = new Date();
+    S.outbox.push({ path: `daily/${d}_${z(now.getHours())}${z(now.getMinutes())}${z(now.getSeconds())}.json`, json: dayReport(d) });
+    if (!S.outbox.some((x) => x.snapshot)) S.outbox.push({ path: 'snapshot/latest.json', snapshot: true, replace: true }); // снимок собирается при отправке
+    save(); flushOutbox();
+  }
+  const utf8b64 = (str) => btoa(unescape(encodeURIComponent(str)));
+  let flushing = false;
+  async function flushOutbox() {
+    const r = C && C.config && C.config.reports;
+    if (!r || flushing || !navigator.onLine) return;
+    flushing = true;
+    try {
+      // ponytail: snapshot перезаписывается через sha, остальные файлы уникальны по времени
+      const queue = S.outbox.slice();
+      for (const item of queue) {
+        const url = `https://api.github.com/repos/${r.owner}/${r.repo}/contents/${item.path}`;
+        const headers = { Authorization: 'Bearer ' + r.token, Accept: 'application/vnd.github+json' };
+        let sha;
+        if (item.replace) { const g = await fetch(url, { headers }); if (g.ok) sha = (await g.json()).sha; }
+        const json = item.snapshot ? { v: 1, kind: 'snapshot', at: new Date().toISOString(), state: Object.assign({}, S, { outbox: [] }) } : item.json;
+        const body = { message: item.path, content: utf8b64(JSON.stringify(json, null, 1)) };
+        if (sha) body.sha = sha;
+        const res = await fetch(url, { method: 'PUT', headers, body: JSON.stringify(body) });
+        if (res.ok || res.status === 422) { S.outbox = S.outbox.filter((x) => x.path !== item.path); S.lastSend = new Date().toISOString(); save(); }
+        else break;
+      }
+    } catch (e) { /* нет сети или GitHub недоступен: попробуем позже */ }
+    flushing = false;
+  }
+  setInterval(() => { if (C) flushOutbox(); }, 5 * 60000);
+  window.addEventListener('online', () => { if (C) flushOutbox(); });
+
+  // истории для «послушать» (режим «не хочу»): длинные тексты из уроков чтения
+  const stories = () => C.lessons.filter((l) => skillOf(l).track === 'reading').flatMap((l) => l.steps).map((t) => t.text).filter((x) => x && x.length > 160);
+
+  function startMini(choice) {
+    let steps = [];
+    if (choice === 'story') steps = [{ type: 'listen', text: pick(stories()) }];
+    if (choice === 'riddle') {
+      const pool = C.lessons.filter((l) => skillOf(l).track === 'logic').flatMap((l) => l.steps).filter((t) => t.type === 'choice');
+      steps = [Object.assign({}, pick(pool))];
+    }
+    if (choice === 'words') {
+      const known = Object.keys(S.words).filter((id) => C.wordById[id]);
+      const ids = shuffle(known.length >= 3 ? known : C.words.map((w) => w.id)).slice(0, 3);
+      steps = ids.map((id) => { const w = C.wordById[id]; const others = shuffle(C.words.filter((x) => x.id !== id)).slice(0, 2);
+        return { type: 'choice', q: `Что значит «${w.word}»?`, pic: w.pic, options: shuffle([{ t: w.simple, ok: true }, ...others.map((o) => ({ t: o.simple, err: 'word_meaning' }))]), reviewWord: S.words[id] ? id : null }; });
+    }
+    P = { mode: 'mini', lesson: { id: 'mini-' + choice, title: 'Самое лёгкое' }, lang: 'ru', steps, i: 0, t0: Date.now(), wrongs: 0, hints: 0, results: [] };
+    newTask();
+  }
+
   // ---------- каркас экрана ----------
   function shell(active, inner) {
     const nav = [['today', '☀️', 'Сегодня'], ['map', '🗺️', 'Карта'], ['skills', '🌳', 'Навыки'], ['homework', '📷', 'Домашка']];
@@ -202,31 +324,82 @@
 
   // ---------- экраны ----------
   function viewToday() {
-    const ds = dueSkills(), dw = dueWords();
-    const main = mainPick();
-    const msg = S.parent.comment ? S.parent.comment : pick([
-      'Сегодня немного, но по-настоящему. Выбирай, с чего начнём.',
-      'Если станет трудно, нажимай 💡. Это не стыдно, так учатся.',
-      'Луна принесла новые задания. Посмотрим?'
-    ]);
-    let h = `<div class="hello"><div class="duo">${Chars.html('nika', 'happy')}${Chars.html('luna', 'happy', 'md')}</div>
-      <div class="bubble"><div class="tag">${S.parent.comment ? 'Записка от мамы' : 'Ника'}</div><div>Привет, ${esc(S.name || 'друг')}! ${rich(msg)}</div></div></div>`;
-    h += '<div class="cards">';
-    if (ds.length || dw.length) {
-      const what = [...ds.map((s) => s.title), dw.length ? `слова (${dw.length})` : ''].filter(Boolean).join(', ');
-      h += `<button class="task-card" data-go="#/review"><div class="pic" style="background:var(--sun-l)">🔁</div>
-        <div><span class="tag yellow">3 минуты</span><div class="t">Вспомним</div><div class="m">${esc(what)}</div></div><div class="go">➜</div></button>`;
+    const d = today(), mode = modeFor(d), M = modeInfo(mode);
+    closeDayIfNeeded();
+    const dy = S.days[d];
+    const note = dayNote(d);
+    const chip = `<span class="tag">${M.emoji} ${esc(M.title)}${note ? ' · ' + esc(note) : ''}</span>`;
+    const bubble = (who, mood, text, tag) => `<div class="hello"><div class="duo">${Chars.html('nika', who === 'nika' ? mood : 'happy')}${Chars.html('luna', who === 'luna' ? mood : 'happy', 'md')}</div>
+      <div class="bubble">${tag ? `<div class="tag">${esc(tag)}</div>` : ''}<div>${text}</div></div></div>`;
+    const momNote = S.parent.comment ? `<div class="card" style="margin-bottom:16px"><div class="tag yellow">Записка от мамы</div><div>${rich(S.parent.comment)}</div></div>` : '';
+
+    // выходной и день отдыха: ничего обязательного
+    if (mode === 'off' || mode === 'weekend') {
+      let h = chip + bubble('nika', 'happy', `Привет, ${esc(S.name)}! ${esc(M.about)}`) + momNote;
+      h += '<h2>Если хочется</h2><div class="tiles">';
+      for (const [tid, e, t] of [['create', '🎨', 'Создать'], ['book', '📚', 'Моя книга'], ['english', '🎧', 'English'], ['logic', '🧩', 'Загадка'], ['story', '👂', 'Послушать историю']]) {
+        h += `<button class="tile" style="background:${track(tid === 'book' || tid === 'story' ? 'reading' : tid).color}" data-tile="${tid}"><span class="e">${e}</span>${t}</button>`;
+      }
+      return shell('today', h + '</div>');
     }
-    if (main) h += lessonCard(main, 'Главное сегодня');
-    h += '</div>';
-    h += '<h2>Что хочется?</h2><div class="tiles">';
-    const tiles = [['reading', '📖', 'История'], ['math', '🔢', 'Числа'], ['words', '🔤', 'Слова'], ['english', '🌍', 'English'], ['logic', '🧩', 'Загадка'], ['create', '🎨', 'Создать'], ['book', '📚', 'Моя книга']];
-    for (const [tid, e, t] of tiles) {
-      const tr = track(tid === 'book' ? 'reading' : tid);
-      h += `<button class="tile" style="background:${tr.color}" data-tile="${tid}"><span class="e">${e}</span>${t}</button>`;
+
+    // ещё не начали
+    if (!dy || !dy.started) {
+      return shell('today', `${chip}${bubble('nika', 'happy', `Привет, ${esc(S.name)}! ${esc(M.about)} Когда будешь готова, начинай рабочее время.`)}${momNote}
+        <div class="card" style="text-align:center;padding:30px"><button class="btn green" style="font-size:26px;min-height:84px;padding:20px 40px" data-act="startday">▶ Начинаем рабочее время</button>
+        <p class="sub" style="margin-top:16px">${M.minutes} минут. Ника, Луна и мама тоже работают.</p></div>
+        <div class="pfoot"><button class="btn soft small" data-go="#/nowant">Сегодня не хочу</button></div>`);
     }
-    h += '</div>';
-    return shell('today', h);
+
+    // самочувствие
+    if (!dy.energy) {
+      const hi = dy.by === 'kira' ? 'Ты начала сама. Это и есть рабочее время.' : 'Рабочее время началось.';
+      return shell('today', `${chip}${bubble('nika', 'proud', `${hi} Как ты сейчас?`)}
+        <div class="tiles" style="max-width:640px">
+          <button class="tile" style="background:var(--green-l)" data-energy="ok"><span class="e">😊</span>Бодрая</button>
+          <button class="tile" style="background:var(--sun-l)" data-energy="meh"><span class="e">😐</span>Так себе</button>
+          <button class="tile" style="background:var(--peach-l)" data-energy="tired"><span class="e">😴</span>Устала</button></div>`);
+    }
+
+    // конец дня
+    if (dy.end) {
+      const done = dy.steps.filter((x) => x.done && x.kind !== 'break').length;
+      const extraBtns = !dy.extraLesson ? `<h2>Хочешь ещё одну?</h2><p class="sub">Только если правда хочется. Можно и закончить.</p><div class="tiles">
+          ${[['reading', '📖', 'История'], ['math', '🔢', 'Числа'], ['english', '🎧', 'English'], ['logic', '🧩', 'Загадка'], ['create', '🎨', 'Создать']].map(([tid, e, t]) => `<button class="tile" style="background:${track(tid).color}" data-extra="${tid}"><span class="e">${e}</span>${t}</button>`).join('')}</div>` : '';
+      const text = dy.refused ? 'Сегодня был лёгкий день. Это тоже нормально. Завтра продолжим.' : dy.timeUp ? 'Время вышло. На сегодня достаточно, остальное доделаем завтра.' : `На сегодня всё. Ты сделала шагов: ${done}. Отлично поработали.`;
+      return shell('today', `${chip}<div class="done-screen"><div class="duo" style="justify-content:center">${Chars.html('nika', 'proud', 'jump')}${Chars.html('luna', 'happy', 'md jump')}</div>
+        <h1>На сегодня всё</h1><p class="sub" style="font-size:22px">${esc(text)}</p></div>${extraBtns}`);
+    }
+
+    // план дня
+    const nx = nextStepOf(dy);
+    const mins = minutesSince(dy.started);
+    const icon = { review: '🔁', break: '🧃', reading: '📖', math: '🔢', russian: '✏️', words: '🔤', english: '🎧', world: '🌍', logic: '🧩', create: '🎨', homework: '📷' };
+    let list = dy.steps.map((x) => `<div class="skill" style="${x === nx ? 'outline:4px solid var(--violet)' : ''}"><div class="lv">${x.done ? '✅' : icon[x.track] || '•'}</div>
+      <div><div>${esc(x.title)}</div><div class="st">${x.done ? 'готово' : x === nx ? 'сейчас' : 'потом'}</div></div></div>`).join('');
+    let go = '';
+    if (nx) {
+      if (nx.kind === 'break') go = `<button class="btn green" data-act="breakdone">🧃 Отдохнула, дальше</button>`;
+      else go = `<button class="btn" data-act="nextstep">Дальше: ${esc(nx.title)}</button>`;
+    }
+    const brk = nx && nx.kind === 'break' ? bubble('luna', 'happy', 'Перерыв. Встань, потянись, попей воды. 5 минут, и дальше.') : '';
+    return shell('today', `${chip}<div class="row" style="justify-content:space-between"><h1>Сегодня</h1><span class="tag green">⏱ ${mins} из ${modeInfo(dy.mode).minutes} мин</span></div>
+      ${brk}${momNote}<div style="max-width:720px">${list}</div><div class="pfoot">${go}</div>
+      <div class="pfoot"><button class="btn soft small" data-go="#/nowant">Сегодня не хочу</button></div>`);
+  }
+
+  function viewNoWant() {
+    const reasons = [['bored', 'Скучно'], ['tired', 'Устала'], ['hard', 'Трудно'], ['dunno', 'Не знаю']];
+    const sel = (day() && day().refuseReason) || '';
+    return shell('today', `<div class="hello"><div class="duo">${Chars.html('nika', 'support')}${Chars.html('luna', 'happy', 'md')}</div>
+      <div class="bubble">Окей. Так бывает. Тогда выбери самое лёгкое, это займёт пару минут.</div></div>
+      <p class="sub">Если хочешь, скажи почему (можно не выбирать):</p>
+      <div class="row" style="margin-bottom:20px">${reasons.map(([k, t]) => `<button class="btn ${sel === k ? '' : 'soft'} small" data-reason="${k}">${t}</button>`).join('')}</div>
+      <div class="tiles" style="max-width:720px">
+        <button class="tile" style="background:var(--sky-l)" data-mini="story"><span class="e">👂</span>Послушать историю</button>
+        <button class="tile" style="background:var(--sun-l)" data-mini="riddle"><span class="e">🧩</span>Одна загадка</button>
+        <button class="tile" style="background:var(--peach-l)" data-mini="words"><span class="e">🔤</span>3 слова</button></div>
+      <div class="pfoot"><button class="btn soft small" data-go="#/today">Назад</button></div>`);
   }
 
   function viewMap(tid) {
@@ -306,12 +479,32 @@
     if (cleanup) { cleanup(); cleanup = null; }
     c.toBlob((b) => showShot(b), 'image/jpeg', 0.9);
   }
+  // фото домашки сразу уходит в почтовый ящик (без хранения в браузере: большие картинки не влезут)
+  async function uploadHomework(blob, path) {
+    const r = C.config.reports; if (!r) return 'nobox';
+    try {
+      const img = await createImageBitmap(blob);
+      const k = Math.min(1, 1600 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const b64 = c.toDataURL('image/jpeg', 0.78).split(',')[1];
+      const res = await fetch(`https://api.github.com/repos/${r.owner}/${r.repo}/contents/${path}`, { method: 'PUT',
+        headers: { Authorization: 'Bearer ' + r.token, Accept: 'application/vnd.github+json' }, body: JSON.stringify({ message: path, content: b64 }) });
+      return res.ok ? 'ok' : 'fail';
+    } catch (e) { return 'fail'; }
+  }
   function showShot(blob) {
     const url = URL.createObjectURL(blob);
     const d = new Date(), name = `домашка_${dstr(d)}_${z(d.getHours())}-${z(d.getMinutes())}.${blob.type === 'application/pdf' ? 'pdf' : 'jpg'}`;
     document.getElementById('camwrap').innerHTML = `${blob.type.startsWith('image') ? `<img class="shot" src="${url}" alt="Фото задания">` : '<p>Файл выбран.</p>'}
       <div class="pfoot"><a class="btn green" href="${url}" download="${name}">💾 Сохранить для мамы</a><button class="btn soft" data-go="#/homework">Переснять</button></div>
-      <p class="sub">Файл сохранится в папку «Загрузки». Скажи маме, что там новое задание.</p>`;
+      <p class="sub" id="hwstatus">Отправляю маме…</p>`;
+    if (blob.type.startsWith('image')) {
+      uploadHomework(blob, `homework/${dstr(d)}_${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.jpg`).then((st) => {
+        const el = document.getElementById('hwstatus'); if (!el) return;
+        el.textContent = st === 'ok' ? '✅ Отправлено маме. Разбор появится здесь.' : 'Не получилось отправить. Нажми «Сохранить для мамы» и скажи маме, что в «Загрузках» новое задание.';
+      });
+    } else { const el = document.getElementById('hwstatus'); if (el) el.textContent = 'Нажми «Сохранить для мамы» и скажи маме, что в «Загрузках» новое задание.'; }
   }
 
   // ---------- онбординг ----------
@@ -368,11 +561,13 @@
   }
   function newTask() {
     const t = P.steps[P.i];
-    P.ts = { wrongs: 0, hints: 0, revealed: false, solved: false, errs: [], listenedAfterWrong: false, input: '', wrongOpts: [], ans: [], pool: [], fixed: 0, matched: [], sel: null };
+    P.ts = { wrongs: 0, hints: 0, revealed: false, solved: false, errs: [], listenedAfterWrong: false, input: '', wrongOpts: [], ans: [], pool: [], fixed: 0, matched: [], sel: null,
+      help: [], audioOn: false, syllOn: false, menu: false, instr: null, wordHelp: null };
     if (t.type === 'order') P.ts.pool = shuffle(t.items.map((x, i) => ({ x, i })));
     if (t.type === 'choice') P.ts.opts = t.keepOrder ? t.options : shuffle(t.options);
     if (t.type === 'match') { P.ts.left = shuffle(t.pairs.map((p, i) => ({ x: p[0], i }))); P.ts.right = shuffle(t.pairs.map((p, i) => ({ x: p[1], i }))); }
     renderPlayer();
+    if (t.type === 'listen') setTimeout(() => speak(t.text, 'ru'), 400);
   }
   const isCheckable = (t) => ['choice', 'input', 'order', 'match'].includes(t.type);
   const tLang = (t) => t.lang || P.lang;
@@ -388,11 +583,13 @@
     if (t.type === 'word') {
       const w = C.wordById[t.word];
       body += `<div class="card wordcard"><div class="tag">Новое слово</div>${w.img ? `<img class="pic-img" src="${esc(src(w.img))}" alt="">` : `<div class="p">${esc(w.pic)}</div>`}
-        <div class="w">${rich(w.word)} ${sayBtn(w.word)}</div><div class="d">${rich(w.simple)}</div>
-        <div class="ex">${rich(w.example)} ${sayBtn(w.example)}</div></div>`;
+        <div class="w">${rich(w.word)} ${ts.audioOn ? sayBtn(w.word) : ''}</div><div class="d">${rich(w.simple)}</div>
+        <div class="ex">${rich(w.example)} ${ts.audioOn ? sayBtn(w.example) : ''}</div></div>`;
+    } else if (t.type === 'listen') {
+      body += `<div class="tag">Послушай</div><div class="reading">${sayBtn(t.text, 'ru', 'say')}${rich(t.text)}</div>`;
     } else {
-      if (t.q) body += `<p class="q">${rich(t.q, t.qLang)} ${sayBtn(t.q, t.qLang || 'ru')}</p>`;
-      if (t.text) body += `<div class="reading">${sayBtn(t.text, lang, 'say')}${rich(t.text, lang)}</div>`;
+      if (t.q) body += `<p class="q">${rich(t.q, t.qLang)} ${ts.audioOn ? sayBtn(t.q, t.qLang || 'ru') : ''}</p>`;
+      if (t.text) body += `<div class="reading">${ts.audioOn ? sayBtn(t.text, lang, 'say') : ''}${rich(t.text, lang)}</div>`;
       if (t.img) body += `<img class="pic-img" src="${esc(src(t.img))}" alt="">`;
       if (t.pic) body += `<div class="pic-big">${esc(t.pic)}</div>`;
       if (t.audio) body += `<p>${sayBtn(t.audio, lang, 'big')} <span class="listen muted">Нажми и послушай</span></p>`;
@@ -428,14 +625,26 @@
     for (let k = 0; k < ts.hints && k < hints.length; k++) {
       body += `<div class="hintbox"><b>💡 ${HINT_LABELS[k] || 'Подсказка'}:</b><span>${rich(hints[k])}</span></div>`;
     }
-    if (ts.revealed) body += `<div class="hintbox"><b>👀 Ответ:</b><span>${rich(answerText(t))}. Теперь сделай это сама.</span></div>`;
+    if (ts.revealed) body += `<div class="hintbox"><b>🙋 Дальше вместе:</b><span>Это правда трудная задача. Позови маму, вы разберёте её вместе. Или пропусти пока, мы к ней вернёмся.</span></div>`;
+    if (ts.instr) body += `<div class="hintbox"><b>🤔 Что делать:</b><span>${rich(ts.instr)}</span></div>`;
+    if (ts.wordHelp) body += ts.wordHelp.length ? ts.wordHelp.map((w) => `<div class="hintbox"><b>${esc(w.pic)} ${rich(w.word)}:</b><span>${rich(w.simple)}</span></div>`).join('')
+      : `<div class="hintbox"><b>🔤 Слово:</b><span>Найди непонятное слово и посмотри на слова рядом с ним. Если не выходит, спроси маму, что оно значит.</span></div>`;
+    if (ts.menu) {
+      const opts = [];
+      if (!ts.audioOn) opts.push(['reading', '👀', 'Не могу прочитать']);
+      opts.push(['word', '🔤', 'Не понимаю слово']);
+      opts.push(['instruction', '🤔', 'Не понимаю, что делать']);
+      if (isCheckable(t) && !ts.solved && !ts.revealed) opts.push(['solve', '🧩', 'Не знаю, как решить']);
+      body += `<div class="card" style="margin-top:16px"><div class="tag yellow">Что трудно?</div><div class="tiles">${opts.map(([k, e, txt]) => `<button class="tile" style="background:var(--sun-l)" data-help="${k}"><span class="e">${e}</span>${txt}</button>`).join('')}</div></div>`;
+    }
 
     let foot = '';
-    if (t.type === 'info' || t.type === 'word') foot = `<button class="btn" data-act="next">Дальше</button>`;
-    else if (t.type === 'say') foot = `<button class="btn green" data-act="next">${esc(t.done || 'Готово')}</button>`;
+    const helpBtn = `<button class="btn yellow ${isCheckable(t) ? '' : 'small'}" data-act="helpmenu">💡 Мне трудно</button>`;
+    if (t.type === 'info' || t.type === 'word') foot = `${helpBtn}<button class="btn" data-act="next">Дальше</button>`;
+    else if (t.type === 'say') foot = `${helpBtn}<button class="btn green" data-act="next">${esc(t.done || 'Готово')}</button>`;
+    else if (t.type === 'listen') foot = `<button class="btn green" data-act="next">Дослушала</button>`;
     else if (!ts.solved) {
-      const canHint = !ts.revealed;
-      if (canHint) foot += `<button class="btn yellow" data-act="hint">💡 Мне трудно</button>`;
+      foot += ts.revealed ? `<button class="btn soft" data-act="skip">Пропустить пока</button>` : helpBtn;
       if (t.type === 'input') foot += `<button class="btn" data-act="check" ${ts.input ? '' : 'disabled'}>Проверить</button>`;
       if (t.type === 'order') foot += `<button class="btn" data-act="check" ${ts.pool.length ? 'disabled' : ''}>Проверить</button>`;
     }
@@ -458,7 +667,7 @@
   const PRAISE_CLEAN = ['Верно.', 'Точно.', 'Да, так и есть.', 'Правильно, и без подсказок.', 'В точку.'];
   const PRAISE_RETRY = ['Получилось со второй попытки. Так и учатся.', 'Ты не сдалась и нашла.', 'Да! Ошибка помогла найти правильный путь.'];
   const PRAISE_HINT = ['Подсказка помогла, и ты справилась.', 'Разобрались по шагам. Получилось.'];
-  const WRONG = ['Почти. Давай посмотрим ещё раз.', 'Не совсем. Прочитай ещё раз, можно нажать 🔊.', 'Хм, не то. Попробуй другой вариант.'];
+  const WRONG = ['Почти. Давай посмотрим ещё раз.', 'Не совсем. Прочитай ещё раз, медленно.', 'Хм, не то. Попробуй другой вариант.'];
 
   function wrong(err) {
     const ts = P.ts; ts.wrongs++; P.wrongs++;
@@ -471,13 +680,15 @@
   function solved() {
     const t = P.steps[P.i], ts = P.ts; ts.solved = true;
     P.results.push({ t: Date.now(), lesson: P.lesson.id, skill: P.mode === 'lesson' ? P.lesson.skill : t.reviewSkill || null, word: t.wordRef || t.reviewWord || null, step: P.i,
-      wrongs: ts.wrongs, hints: ts.hints, revealed: ts.revealed, cond: ts.listenedAfterWrong, errs: ts.errs, review: P.mode === 'review' });
+      wrongs: ts.wrongs, hints: ts.hints, revealed: ts.revealed, cond: ts.listenedAfterWrong, errs: ts.errs, review: P.mode === 'review', help: ts.help, audio: ts.audioOn });
     const msg = ts.revealed || ts.hints ? pick(PRAISE_HINT) : ts.wrongs ? pick(PRAISE_RETRY) : pick(PRAISE_CLEAN);
     renderPlayer(`<div class="feedback"><div class="in">${Chars.html('nika', 'proud', 'sm')}<div class="msg">${esc(msg)}${t.why ? `<div class="why">${rich(t.why)}</div>` : ''}</div>
       <button class="btn green" data-act="next" autofocus>Дальше</button></div></div>`);
     const b = document.querySelector('.feedback .btn'); if (b) b.focus();
   }
   function nextStep() {
+    const t = P.steps[P.i];
+    if (!isCheckable(t) && P.ts.help.length) P.results.push({ t: Date.now(), lesson: P.lesson.id, skill: P.mode === 'lesson' ? P.lesson.skill : null, step: P.i, info: true, help: P.ts.help });
     if (P.i < P.steps.length - 1) { P.i++; newTask(); return; }
     finish();
   }
@@ -514,11 +725,23 @@
       lines = `<p class="sub">Повторение помогает помнить долго. Следующее будет, когда придёт время.</p>`;
     }
     save();
-    const nxt = P.mode === 'lesson' ? nextInTrack(skillOf(P.lesson).track) : null;
+    if (P.mode === 'lesson') markStepDone('lesson', P.lesson.id);
+    if (P.mode === 'review') markStepDone('review');
+    if (P.mode === 'mini') { // «не хочу»: самое лёгкое сделано, день закрыт без упрёка
+      const d = today(), dy = S.days[d] || (S.days[d] = { mode: modeFor(d), started: Date.now(), by: 'kira' });
+      dy.refused = { reason: dy.refuseReason || null, choice: P.lesson.id.replace('mini-', '') };
+      dy.started = dy.started || Date.now(); dy.by = dy.by || 'kira';
+      dy.steps = dy.steps || []; dy.energy = dy.energy || 'refused'; dy.end = dy.end || Date.now();
+      save(); enqueueReport(d); P = null;
+      if (location.hash === '#/today') route(); else location.hash = '#/today';
+      return;
+    }
+    const dy = day(), inDay = dy && dy.started && !dy.end && dy.steps;
+    const nxt = P.mode === 'lesson' && !inDay ? nextInTrack(skillOf(P.lesson).track) : null;
     P = null;
     app.innerHTML = `<main class="player done-screen"><div class="duo">${Chars.html('nika', 'proud', 'jump')}${Chars.html('luna', 'happy', 'md jump')}</div>
       <h1>Готово!</h1>${lines}
-      <div class="pfoot"><button class="btn" data-go="#/today">На главную</button>${nxt ? `<button class="btn soft" data-go="#/lesson/${nxt.id}">Ещё: ${esc(nxt.title)}</button>` : ''}</div></main>`;
+      <div class="pfoot"><button class="btn" data-go="#/today">${inDay ? 'Дальше' : 'На главную'}</button>${nxt ? `<button class="btn soft" data-go="#/lesson/${nxt.id}">Ещё: ${esc(nxt.title)}</button>` : ''}</div></main>`;
   }
 
   function onPlayerClick(el) {
@@ -555,12 +778,28 @@
       }
       return;
     }
-    if (act === 'hint') {
-      const hints = t.hints && t.hints.length ? t.hints : GENERIC_HINTS;
-      if (ts.hints < hints.length) { ts.hints++; P.hints++; } else ts.revealed = true;
+    if (act === 'helpmenu') { ts.menu = !ts.menu; renderPlayer(); return; }
+    if (el.dataset.help) {
+      const h = el.dataset.help; ts.menu = false; if (!ts.help.includes(h)) ts.help.push(h);
+      if (h === 'reading') { ts.audioOn = true; ts.syllOn = true; }
+      if (h === 'instruction') ts.instr = t.simple || INSTR[t.type] || INSTR.choice;
+      if (h === 'word') {
+        const hay = [t.q, t.text, ...(t.options || []).map((o) => o.t)].filter(Boolean).join(' ').toLowerCase();
+        ts.wordHelp = C.words.filter((w) => hay.includes(w.word.toLowerCase().slice(0, Math.max(4, w.word.length - 2)))).slice(0, 2);
+      }
+      if (h === 'solve') {
+        const hints = t.hints && t.hints.length ? t.hints : GENERIC_HINTS;
+        if (ts.hints < hints.length) { ts.hints++; P.hints++; } else ts.revealed = true;
+        if (ts.hints < hints.length || !ts.revealed) ts.menu = false;
+      }
       renderPlayer(); return;
     }
     if (act === 'next') { nextStep(); return; }
+    if (act === 'skip') {
+      P.results.push({ t: Date.now(), lesson: P.lesson.id, skill: P.mode === 'lesson' ? P.lesson.skill : t.reviewSkill || null, step: P.i,
+        wrongs: ts.wrongs, hints: ts.hints, revealed: true, skipped: true, errs: ts.errs, help: ts.help, audio: ts.audioOn });
+      nextStep(); return;
+    }
     if (act === 'exit') { if (confirm('Выйти из урока? Прогресс этого урока не сохранится.')) { P = null; location.hash = '#/today'; } return; }
   }
 
@@ -584,6 +823,19 @@
       <div class="muted small">Уроков пройдено всего: ${Object.values(S.lessons).filter((x) => x.done).length} из ${C.lessons.length}</div></div>
       <div class="card"><div class="tag">Повторение</div><div style="font-size:34px;font-weight:900">К повтору: ${dueSkills().length + dueWords().length}</div>
       <div class="muted small">Слов в работе: ${Object.keys(S.words).length}</div></div></div>`;
+
+    // режимы и отчёты
+    const d = today(), dy = S.days[d];
+    const mopts = (sel) => Object.entries(C.modes.modes).map(([k, m]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${m.emoji} ${m.title}</option>`).join('');
+    h += `<h2>Сегодня и режимы</h2><div class="card">
+      <div class="row"><b>Сегодня, ${WD[new Date().getDay()]} ${d}:</b><select data-daymode="${d}">${mopts(modeFor(d))}</select>${S.calendar[d] ? '<span class="muted small">выбрано вручную</span>' : ''}</div>
+      <div class="row" style="margin-top:12px">Период с <input type="date" id="rfrom" class="field" style="width:auto"> по <input type="date" id="rto" class="field" style="width:auto">
+        <select id="rmode">${mopts('weekend')}</select><button class="btn small" data-act="setrange">Применить</button><button class="btn soft small" data-act="clearrange">Сбросить ручные режимы</button></div>
+      <label class="row small" style="margin-top:12px"><input type="checkbox" data-act="reminded" ${(dy && dy.by === 'mom') || S.parent.remindOn === d ? 'checked' : ''}> Сегодня рабочее время началось после моего напоминания</label>
+      <p class="muted small">По умолчанию: Пн-Пт школьный день, Сб отдыхаем, Вс полная учёба. 22.10 отдыхаем (день рождения).</p>
+      ${dy && dy.missing && dy.missing.length ? `<p class="small">⚠️ Для этих предметов пока нет уроков, они пропущены: ${esc(dy.missing.join(', '))}.</p>` : ''}
+      <div class="row" style="margin-top:8px"><button class="btn small" data-act="sendreport">📤 Отправить отчёт за сегодня</button><button class="btn soft small" data-act="savereport">💾 Сохранить отчёт файлом</button></div>
+      <p class="muted small">В очереди: ${S.outbox.length}. Последняя отправка: ${S.lastSend ? new Date(S.lastSend).toLocaleString('ru-RU') : 'ещё не было'}. ${C.config.reports ? '' : 'Почтовый ящик пока не подключён: отчёты копятся здесь и уйдут, когда подключим.'}</p></div>`;
 
     // где трудно
     h += '<h2>Где трудно</h2><div class="card"><table class="ptable"><tr><th>Навык</th><th>Заданий</th><th>Чисто</th><th>Случайная</th><th>Не поняла условие</th><th>Слишком сложно</th><th>Повторяющиеся ошибки</th></tr>';
@@ -637,9 +889,10 @@
     if (page === 'lesson') { startLesson(arg); return; }
     if (page === 'review') { startReview(); return; }
     P = null;
-    const views = { today: viewToday, map: () => viewMap(arg), skills: viewSkills, homework: viewHomework, parent: viewParent };
+    const views = { today: viewToday, nowant: viewNoWant, map: () => viewMap(arg), skills: viewSkills, homework: viewHomework, parent: viewParent };
     app.innerHTML = (views[page] || viewToday)();
     window.scrollTo(0, 0);
+    if (!views[page] || page === 'today') { const iv = setInterval(() => { if (!P) app.innerHTML = viewToday(); }, 60000); cleanup = () => clearInterval(iv); }
     if (page === 'map') requestAnimationFrame(drawPath);
   }
 
@@ -651,8 +904,29 @@
     if (el.dataset.act === 'syll') { S.set.syll = !S.set.syll; save(); P ? renderPlayer() : route(); return; }
     if (P) { onPlayerClick(el); return; }
     if (el.dataset.tab) { location.hash = '#/map/' + el.dataset.tab; return; }
+    const d = today();
+    if (el.dataset.act === 'startday') {
+      S.days[d] = Object.assign(S.days[d] || {}, { mode: modeFor(d), started: Date.now(), by: S.parent.remindOn === d ? 'mom' : 'kira' });
+      save(); route(); return;
+    }
+    if (el.dataset.energy) {
+      const dy = S.days[d]; dy.energy = el.dataset.energy;
+      const b = buildDay(dy.mode, dy.energy); dy.steps = b.steps; dy.missing = b.missing; save(); route(); return;
+    }
+    if (el.dataset.act === 'nextstep') {
+      const nx = nextStepOf(S.days[d]); if (!nx) { route(); return; }
+      location.hash = nx.kind === 'review' ? '#/review' : '#/lesson/' + nx.lesson; return;
+    }
+    if (el.dataset.act === 'breakdone') { const nx = nextStepOf(S.days[d]); if (nx) { nx.done = true; nx.at = Date.now(); } save(); route(); return; }
+    if (el.dataset.extra) {
+      const l = nextInTrack(el.dataset.extra); if (!l) { location.hash = '#/map/' + el.dataset.extra; return; }
+      S.days[d].extraLesson = l.id; save(); location.hash = '#/lesson/' + l.id; return;
+    }
+    if (el.dataset.reason) { S.days[d] = S.days[d] || { mode: modeFor(d) }; S.days[d].refuseReason = el.dataset.reason; save(); app.innerHTML = viewNoWant(); return; }
+    if (el.dataset.mini) { startMini(el.dataset.mini); return; }
     if (el.dataset.tile) {
       const tid = el.dataset.tile;
+      if (tid === 'story') { P = { mode: 'free', lesson: { id: 'story', title: 'История' }, lang: 'ru', steps: [{ type: 'listen', text: pick(stories()) }], i: 0, t0: Date.now(), wrongs: 0, hints: 0, results: [] }; newTask(); return; }
       const l = tid === 'book' ? C.lessons.find((x) => x.id === 'rd-book') : nextInTrack(tid);
       location.hash = l ? '#/lesson/' + l.id : '#/map/' + tid; return;
     }
@@ -684,6 +958,18 @@
       const url = URL.createObjectURL(new Blob([JSON.stringify(S, null, 1)], { type: 'application/json' }));
       const a = document.createElement('a'); a.href = url; a.download = `nika-progress-${today()}.json`; a.click(); return;
     }
+    if (act === 'setrange') {
+      const a = document.getElementById('rfrom').value, b = document.getElementById('rto').value, m = document.getElementById('rmode').value;
+      if (!a || !b || a > b) { alert('Выберите даты «с» и «по».'); return; }
+      for (let x = new Date(a + 'T12:00'); dstr(x) <= b; x.setDate(x.getDate() + 1)) S.calendar[dstr(x)] = m;
+      save(); app.innerHTML = viewParent(); return;
+    }
+    if (act === 'clearrange') { S.calendar = {}; save(); app.innerHTML = viewParent(); return; }
+    if (act === 'sendreport') { enqueueReport(today()); el.textContent = 'Поставлено в отправку ✓'; return; }
+    if (act === 'savereport') {
+      const url = URL.createObjectURL(new Blob([JSON.stringify(dayReport(today()), null, 1)], { type: 'application/json' }));
+      const a = document.createElement('a'); a.href = url; a.download = `kira-report-${today()}.json`; a.click(); return;
+    }
     if (act === 'forgetkey') { localStorage.removeItem(KEYSTORE); location.reload(); return; }
     if (act === 'newpin') { S.parent.pin = ''; save(); parentOk = false; route(); return; }
     if (act === 'reset') { if (confirm('Стереть весь прогресс? Сначала лучше выгрузить его.')) { localStorage.removeItem(KEY); S = blankState(); parentOk = false; location.hash = '#/onboarding/1'; } return; }
@@ -692,6 +978,8 @@
     const el = e.target;
     if (el.dataset.manual) { const s = sk(el.dataset.manual); s.manual = el.value === '' ? undefined : +el.value; save(); app.innerHTML = viewParent(); return; }
     if (el.dataset.act === 'unlock') { S.parent.unlockAll = el.checked; save(); return; }
+    if (el.dataset.daymode) { const d = el.dataset.daymode; S.calendar[d] = el.value; const dy = S.days[d]; if (dy && !dy.started) dy.mode = el.value; save(); app.innerHTML = viewParent(); return; }
+    if (el.dataset.act === 'reminded') { const d = today(); S.parent.remindOn = el.checked ? d : ''; if (S.days[d]) S.days[d].by = el.checked ? 'mom' : 'kira'; save(); return; }
     if (el.dataset.act === 'file' && el.files[0]) { showShot(el.files[0]); return; }
     if (el.dataset.act === 'import' && el.files[0]) {
       el.files[0].text().then((txt) => { const s = JSON.parse(txt); if (s.v !== 1) throw 0; S = Object.assign(blankState(), s); save(); alert('Прогресс загружен.'); route(); })
@@ -715,7 +1003,7 @@
   // ---------- старт ----------
   S = load();
   document.body.classList.toggle('syll', S.set.syll);
-  unlock().then(loadContent).then((c) => { C = c; pickedWorlds = S.worlds.slice(); route(); })
+  unlock().then(loadContent).then((c) => { C = c; pickedWorlds = S.worlds.slice(); route(); flushOutbox(); })
     .catch((e) => { app.innerHTML = `<div class="boot">Не получилось загрузить уроки. Проверь интернет и обнови страницу.<br><small>${esc(e.message)}</small></div>`; });
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
