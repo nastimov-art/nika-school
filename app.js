@@ -142,13 +142,13 @@
     const get = (f) => BUNDLE ? Promise.resolve(BUNDLE.files[f]).then((x) => { if (!x) throw new Error(f); return x; })
       : fetch('content/' + f).then((r) => { if (!r.ok) throw new Error(f); return r.json(); });
     const idx = await get('index.json');
-    const [program, words, errors, modes, calendar, worldsData, readwords, catalog, week, ...files] = await Promise.all([get(idx.program), get(idx.words), get(idx.errors), get(idx.modes), get(idx.calendar), get(idx.worlds), get(idx.readwords), get(idx.catalog), get(idx.week), ...idx.lessons.map(get)]);
+    const [program, words, errors, modes, calendar, worldsData, readwords, catalog, week, lines, roadmap, tutor, ...files] = await Promise.all([get(idx.program), get(idx.words), get(idx.errors), get(idx.modes), get(idx.calendar), get(idx.worlds), get(idx.readwords), get(idx.catalog), get(idx.week), get(idx.lines), get(idx.roadmap), get(idx.tutor), ...idx.lessons.map(get)]);
     const lessons = files.flatMap((f) => f.lessons);
     const skills = program.skills;
     const skillById = Object.fromEntries(skills.map((s) => [s.id, s]));
     const wordById = Object.fromEntries(words.words.map((w) => [w.id, w]));
     return { program, tracks: program.tracks, worlds: program.worlds, skills, skillById, lessons, words: words.words, wordById, errors, modes, calendar: calendar.days,
-      config: (BUNDLE && BUNDLE.files['config.json']) || {}, worldsData, readwords, catalog, week };
+      config: (BUNDLE && BUNDLE.files['config.json']) || {}, worldsData, readwords, catalog, week, lines: lines.events, roadmap, tutorCfg: tutor };
   }
   const track = (id) => C.tracks.find((t) => t.id === id) || { id, title: id, emoji: '•', color: '#fff' };
   const skillOf = (l) => C.skillById[l.skill];
@@ -397,6 +397,7 @@
       minutes: mins, time_up: !!dy.timeUp, steps: (dy.steps || []).map((x) => ({ title: x.title, track: x.track, done: !!x.done, why: x.why || '' })), missing: dy.missing || [], notes: dy.notes || [],
       mastery: C.skills.filter((s) => mastery(s.id).n).map((s) => { const m = mastery(s.id); return { id: s.id, title: s.title, track: s.track, priority: s.priority, n: m.n, acc: m.acc, indep: m.indep, diff: m.diff, stab: m.stab, lvl: lvl(s.id), verdict: masteryVerdict(s.id) }; }),
       self: selfStats(), focus: weekFocus(),
+      tutor: (S.tutor || []).filter((x) => dstr(new Date(x.t)) === d),
       extra: dy.extraLesson ? { lesson: dy.extraLesson, done: !!dy.extraDone } : null, refused: dy.refused || null,
       lessons: Object.values(byLesson), errors_legend: C.errors, words_in_work: Object.keys(S.words).length };
   }
@@ -605,7 +606,7 @@
   }
 
   function viewHomework() {
-    const hw = C.lessons.filter((l) => skillOf(l).track === 'homework');
+    const hw = C.lessons.filter((l) => l.homework || skillOf(l).track === 'homework');
     let h = `<h1>Домашка</h1>
       <div class="hello">${Chars.html('luna', 'think', 'md')}<div class="bubble">Сфотографируй задание, которое не получается. Мама пришлёт его мне, и здесь появится разбор по шагам.</div></div>
       <div class="card"><div id="camwrap"><div class="row"><button class="btn" data-act="cam">📷 Включить камеру</button>
@@ -732,7 +733,8 @@
     const mood = ts.solved ? (ts.wrongs || ts.hints ? 'happy' : 'proud') : ts.wrongs > 0 || ts.hints > 0 ? 'support' : (t.mood || (t.type === 'info' || t.type === 'word' ? 'happy' : 'think'));
     const who = t.who || (P.i % 5 === 3 ? 'luna' : 'nika');
     let body = '';
-
+    const rc = ts.react;
+    if (rc) body += `<div class="bubble" style="margin-bottom:14px"><div class="tag ${rc.who === 'luna' ? 'yellow' : ''}">${rc.who === 'luna' ? 'Луна' : 'Ника'}</div>${esc(rc.text)}</div>`;
     if (t.title) body += `<div class="tag">${esc(t.title)}</div>`;
     if (t.type === 'word') {
       const w = C.wordById[t.word];
@@ -783,6 +785,7 @@
     if (ts.instr) body += `<div class="hintbox"><b>🤔 Что делать:</b><span>${rich(ts.instr)}</span></div>`;
     if (ts.wordHelp) body += ts.wordHelp.length ? ts.wordHelp.map((w) => `<div class="hintbox"><b>${esc(w.pic)} ${rich(w.word)}:</b><span>${rich(w.simple)}</span></div>`).join('')
       : `<div class="hintbox"><b>🔤 Слово:</b><span>Найди непонятное слово и посмотри на слова рядом с ним. Если не выходит, спроси маму, что оно значит.</span></div>`;
+    body += tutorHtml();
     if (ts.menu) {
       const opts = [];
       if (!ts.audioOn) opts.push(['reading', '👀', 'Не могу прочитать']);
@@ -806,8 +809,10 @@
     app.innerHTML = `<div class="ptop"><button class="iconbtn" data-act="exit" aria-label="Выйти">✕</button>
         <div class="bar"><i style="width:${pct}%"></i></div>
         <button class="iconbtn ${S.set.syll ? 'on' : ''}" data-act="syll">сло·ги</button></div>
-      <main class="player"><div class="stage">${Chars.html(who, mood, ts.solved && !ts.wrongs ? 'jump' : '')}<div class="body">${body}</div></div>
+      <main class="player"><div class="stage">${Chars.html(rc ? rc.who : who, rc ? rc.mood : mood, ts.solved && !ts.wrongs ? 'jump' : '')}<div class="body">${body}</div></div>
       <div class="pfoot">${foot}</div></main>${feedback || ''}`;
+    clearTimeout(idleTimer);
+    if (isCheckable(t) && !ts.solved && !ts.menu && !ts.idleShown) idleTimer = setTimeout(() => { if (P && P.ts === ts && !ts.solved) { ts.idleShown = true; ts.react = react('idle'); renderPlayer(); } }, 90000);
   }
   function answerText(t) {
     if (t.type === 'choice') return t.options.find((o) => o.ok).t;
@@ -817,6 +822,9 @@
     return '';
   }
 
+  // реакции Ники и Луны на поведение (не болтовня: одна реплика на событие)
+  const react = (ev) => { const e = C.lines[ev]; return e ? { who: e.who, mood: e.mood, text: pick(e.lines) } : null; };
+  let idleTimer = null;
   const PAIR_COLORS = [['#DDF7EA', '#2FBF7F'], ['#FFE9DC', '#FF9A5B'], ['#DDF1FF', '#4AA8E8'], ['#FFF4C9', '#E0A800'], ['#FFE3EE', '#F06A9B'], ['#EDE7FF', '#7C5CFF']];
   const PRAISE_CLEAN = ['Верно.', 'Точно.', 'Да, так и есть.', 'Правильно, и без подсказок.', 'В точку.'];
   const PRAISE_RETRY = ['Получилось со второй попытки. Так и учатся.', 'Ты не сдалась и нашла.', 'Да! Ошибка помогла найти правильный путь.'];
@@ -826,8 +834,10 @@
   function wrong(err) {
     const ts = P.ts; ts.wrongs++; P.wrongs++;
     if (err) ts.errs.push(err);
-    const auto = ts.wrongs >= 2 && ts.hints === 0;
+    const same = ts.errs.length >= 2 && ts.errs[ts.errs.length - 1] === ts.errs[ts.errs.length - 2];
+    const auto = ts.wrongs >= 2 && ts.hints === 0 && !same;
     if (auto) ts.hints = 1, P.hints++;
+    if (same) { ts.react = react('same_error_twice'); ts.menu = true; }
     renderPlayer(`<div class="feedback soft"><div class="in">${Chars.html('nika', 'support', 'sm')}<div class="msg">${esc(pick(WRONG))}${auto ? '<div class="why">Я открыла подсказку ниже.</div>' : ''}</div></div></div>`);
     const fb = document.querySelector('.feedback'); setTimeout(() => fb && fb.remove(), 1700);
   }
@@ -836,7 +846,9 @@
     P.results.push({ t: Date.now(), lesson: P.lesson.id, skill: P.mode === 'lesson' || P.mode === 'practice' ? P.lesson.skill : t.reviewSkill || null, word: t.wordRef || t.reviewWord || null, step: P.i,
       wrongs: ts.wrongs, hints: ts.hints, revealed: ts.revealed, cond: ts.listenedAfterWrong, errs: ts.errs, review: P.mode === 'review', help: ts.help, audio: ts.audioOn,
       d: t.d || P.diff || 1, fmt: t.type, ms: Date.now() - (ts.t0 || Date.now()), gen: !!t.gen });
-    const msg = ts.revealed || ts.hints ? pick(PRAISE_HINT) : ts.wrongs ? pick(PRAISE_RETRY) : pick(PRAISE_CLEAN);
+    const hardAlone = !ts.wrongs && !ts.hints && !ts.help.length && (t.d || P.diff || 1) >= 2;
+    const rr = hardAlone ? react('hard_solved_alone') : ts.wrongs && !ts.hints && !ts.help.length ? react('fixed_after_error') : null;
+    const msg = rr ? rr.text : ts.revealed || ts.hints ? pick(PRAISE_HINT) : ts.wrongs ? pick(PRAISE_RETRY) : pick(PRAISE_CLEAN);
     renderPlayer(`<div class="feedback"><div class="in">${Chars.html('nika', 'proud', 'sm')}<div class="msg">${esc(msg)}${t.why ? `<div class="why">${rich(t.why)}</div>` : ''}</div>
       <button class="btn green" data-act="next" autofocus>Дальше</button></div></div>`);
     const b = document.querySelector('.feedback .btn'); if (b) b.focus();
@@ -935,15 +947,19 @@
       return;
     }
     if (act === 'helpmenu') { ts.menu = !ts.menu; renderPlayer(); return; }
+    if (act === 'tutsend') { const i = document.getElementById('tutin'); tutorSend(i ? i.value : ''); return; }
+    if (el.dataset.tutq) { tutorSend(el.dataset.tutq); return; }
     if (el.dataset.help) {
       const h = el.dataset.help; ts.menu = false; if (!ts.help.includes(h)) ts.help.push(h);
-      if (h === 'reading') { ts.audioOn = true; ts.syllOn = true; }
+      if (h === 'reading') { ts.audioOn = true; ts.syllOn = true; ts.react = react('read_help'); }
       if (h === 'instruction') ts.instr = t.simple || INSTR[t.type] || INSTR.choice;
       if (h === 'word') {
         const hay = [t.q, t.text, ...(t.options || []).map((o) => o.t)].filter(Boolean).join(' ').toLowerCase();
         ts.wordHelp = C.words.filter((w) => hay.includes(w.word.toLowerCase().slice(0, Math.max(4, w.word.length - 2)))).slice(0, 2);
       }
+      if (h === 'solve' && tutorReady && !ts.revealed) { openTutor(); return; }
       if (h === 'solve') {
+        ts.react = react('asked_hint');
         const hints = t.hints && t.hints.length ? t.hints : GENERIC_HINTS;
         if (ts.hints < hints.length) { ts.hints++; P.hints++; } else ts.revealed = true;
         if (ts.hints < hints.length || !ts.revealed) ts.menu = false;
@@ -980,6 +996,11 @@
       <div class="card"><div class="tag">Повторение</div><div style="font-size:34px;font-weight:900">К повтору: ${dueSkills().length + dueWords().length}</div>
       <div class="muted small">Слов в работе: ${Object.keys(S.words).length}</div></div></div>`;
 
+    h += `<div class="row" style="margin:8px 0 0"><button class="btn" data-go="#/path">🗺 Путь Киры</button></div>`;
+    const tset = tutorSet();
+    h += `<h2>AI-учитель на этом компьютере</h2><div class="card"><p class="small">Работает через Ollama на этом же ноутбуке, без интернета и без оплаты. Включается, когда Кира выбирает «Мне трудно» → «Не знаю, как решить».</p>
+      <div class="row"><input class="field" id="turl" style="width:280px" value="${esc(tset.url)}"><input class="field" id="tmodel" style="width:180px" value="${esc(tset.model)}">
+      <button class="btn small" data-act="tutsave">Сохранить и проверить</button></div><p class="small" id="tstat">${tutorReady ? '✅ Учитель на связи' : '○ Учитель не найден: подсказки работают как обычно'}</p></div>`;
     // режимы и отчёты
     const d = today(), dy = S.days[d];
     const mopts = (sel) => Object.entries(C.modes.modes).map(([k, m]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${m.emoji} ${m.title}</option>`).join('');
@@ -1033,7 +1054,7 @@
     h += `<h2>Записка на главный экран</h2><div class="card"><textarea class="field" id="pcomment" placeholder="Её покажет Ника на главном экране">${esc(S.parent.comment)}</textarea>
       <div class="row" style="margin-top:10px"><button class="btn small" data-act="savecomment">Сохранить</button><button class="btn soft small" data-act="clearcomment">Убрать</button></div></div>
       <h2>Заметки для себя</h2><div class="card"><textarea class="field" id="pnotes">${esc(S.parent.notes)}</textarea>
-      <div class="row" style="margin-top:10px"><button class="btn small" data-act="savenotes">Сохранить</button></div></div>
+      <div class="row" style="margin-top:10px"><button class="btn small" data-act="savenotes">Сохранить</button><button class="btn soft small" data-act="voice" data-target="pnotes">🎤 Надиктовать</button></div></div>
       <h2>Данные</h2><div class="card"><div class="row">
       <button class="btn small" data-act="export">⬇️ Выгрузить прогресс</button>
       <label class="btn soft small">⬆️ Загрузить<input type="file" accept=".json" data-act="import" hidden></label>
@@ -1042,6 +1063,153 @@
       <button class="btn soft small" data-act="reset">Сбросить всё</button></div>
       <p class="muted small">Прогресс хранится только в этом браузере. Выгрузку можно передать в Claude: он разберёт ошибки и добавит уроки.</p></div>`;
     return shell('', h);
+  }
+
+  // ---------- путь Киры (для мамы): сейчас → месяц → 3 месяца → конец 2 класса → дальше ----------
+  function viewPath() {
+    if (!parentOk) { location.hash = '#/parent'; return ''; }
+    const R = C.roadmap, ss = selfStats();
+    const areas = {};
+    for (const s of C.skills) { if (s.track === 'homework') continue; const a = areas[s.track] = areas[s.track] || { t: track(s.track), n: 0, started: 0, ok: 0 }; a.n++; if (mastery(s.id).n) a.started++; if (lvl(s.id) >= 3) a.ok++; }
+    let h = `<div class="row" style="justify-content:space-between"><h1>Путь Киры</h1><button class="btn soft small" data-go="#/parent">← Кабинет</button></div>
+      <h2>Сейчас</h2><div class="cards">${Object.values(areas).map((a) => `<div class="card"><div class="tag">${a.t.emoji} ${esc(a.t.title)}</div>
+        <div style="font-size:28px;font-weight:900">${a.ok} из ${a.n} получается</div><div class="muted small">начато: ${a.started}</div></div>`).join('')}</div>
+      <p class="sub">Самостоятельность за 14 дней: начала сама ${ss.started_self} из ${ss.days}, довела до конца ${ss.finished}, отказов ${ss.refused}.</p>`;
+    for (const m of R.months) {
+      const done = m.skills.filter((id) => lvl(id) >= m.target).length;
+      const share = ss.days ? ss.started_self / ss.days : 0;
+      h += `<h2>${esc(m.title)}</h2><div class="card"><div class="muted small">${esc(m.period)}</div><p>${esc(m.goal)}</p>
+        <div class="bar" style="margin:10px 0"><i style="width:${Math.round((done / m.skills.length) * 100)}%"></i></div>
+        <p class="small">Навыков на уровне 🌳 и выше: ${done} из ${m.skills.length}. Цель по самостоятельности: начинать сама в ${Math.round(m.self.started_self_share * 100)}% дней (сейчас ${Math.round(share * 100)}%).</p>
+        <div>${m.skills.map((id) => C.skillById[id] ? `<span class="tag ${lvl(id) >= m.target ? 'green' : ''}">${lvl(id) ? LV[lvl(id)] : '○'} ${esc(C.skillById[id].title)}</span>` : '').join(' ')}</div></div>`;
+    }
+    h += `<h2>${esc(R.grade2_end.title)}</h2><div class="card"><ul>${R.grade2_end.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+      <p class="muted small">Что из этого уже есть в программе, видно в кабинете: «Карта навыков».</p></div>`;
+    h += `<h2>Дальше</h2><div class="cards">${R.later.map((x) => `<div class="card"><div class="tag">${esc(x.title)}</div><p>${esc(x.text)}</p></div>`).join('')}</div>`;
+    return shell('', h);
+  }
+
+  // ---------- AI-учитель (локальная модель через Ollama на этом компьютере) ----------
+  let tutorReady = false;
+  const tutorSet = () => Object.assign({ url: C.tutorCfg.default_url, model: C.tutorCfg.default_model }, S.set.tutor || {});
+  async function checkTutor() {
+    try {
+      const r = await fetch(tutorSet().url + '/api/tags', { signal: AbortSignal.timeout(2500) });
+      const j = await r.json(); tutorReady = (j.models || []).some((m) => m.name.startsWith(tutorSet().model.split(':')[0]));
+      return j.models || [];
+    } catch (e) { tutorReady = false; return null; }
+  }
+  const answerOf = (t) => t.type === 'choice' ? t.options.find((o) => o.ok).t : t.type === 'input' ? String([].concat(t.answer)[0]) : t.type === 'order' ? t.items.join(', ') : t.type === 'match' ? t.pairs.map((p) => p.join(' = ')).join('; ') : '';
+  function tutorSystem(t) {
+    const strong = C.skills.filter((s) => lvl(s.id) >= 3).map((s) => s.title).join(', ') || 'логика, творчество';
+    const working = C.skills.filter((s) => mastery(s.id).n && lvl(s.id) < 3).map((s) => s.title).join(', ') || 'пока мало данных';
+    const sid = P.lesson.skill || t.reviewSkill;
+    const cnt = {}; (sid ? attemptsOf(sid) : []).flatMap((x) => x.errs || []).forEach((e) => (cnt[e] = (cnt[e] || 0) + 1));
+    const errs = Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([e]) => C.errors[e] || e).join(', ') || 'нет данных';
+    const task = [t.text ? 'Текст: ' + t.text : '', 'Вопрос: ' + (t.q || ''), t.options ? 'Варианты: ' + t.options.map((o) => o.t).join(' / ') : '', t.items ? 'Карточки: ' + t.items.join(' / ') : ''].filter(Boolean).join('\n');
+    return C.tutorCfg.system.replace('{strong}', strong).replace('{working}', working).replace('{errors}', errs)
+      .replace('{topic}', sid && C.skillById[sid] ? C.skillById[sid].title : P.lesson.title).replace('{task}', task).replace('{answer}', answerOf(t));
+  }
+  // предохранители: маленькой модели не доверяем
+  function guard(text, t) {
+    let x = String(text || '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/\s*[—–]\s*/g, ', ').replace(/\s+/g, ' ').trim();
+    // Кира девочка: маленькая модель путает род
+    x = x.replace(/(^|[^а-яё])(сказал|понял|нашёл|нашел|написал|сделал|выбрал|подумал|решил|ответил|заметил|посчитал|прочитал|догадался|справился)(?![а-яё])/gi,
+      (m0, pre, w) => pre + (/ся$/i.test(w) ? w.slice(0, -2) + 'ась' : w + 'а')).replace(/нашёла|нашела/gi, 'нашла');
+    const sents = x.match(/[^.!?]+[.!?]+/g) || [x];
+    if (sents.length > 2) x = (sents[0] + ' ' + sents[sents.length - 1]).trim(); // первое предложение и вопрос в конце
+    const ans = answerOf(t).toLowerCase().trim();
+    const leak = ans && (/^\d+$/.test(ans) ? new RegExp('(^|[^\\d])' + ans + '([^\\d]|$)').test(x) : ans.length > 2 && x.toLowerCase().includes(ans));
+    if (leak || !x) {
+      const hints = t.hints && t.hints.length ? t.hints : GENERIC_HINTS;
+      return { text: hints[Math.min(P.ts.tutor.leaks++, hints.length - 1)] + ' Как думаешь?', leak: true };
+    }
+    return { text: x, leak: false };
+  }
+  // если Кира написала ответ, код сам проверяет его и говорит модели, верно ли (модель не путает похвалу)
+  function verdictNote(text, t) {
+    const ans = answerOf(t).toLowerCase().trim(), k = text.toLowerCase().trim();
+    if (!ans) return [];
+    const num = /^\d+$/.test(ans), kn = (k.match(/\d+/) || [])[0];
+    if (num && kn) return [{ role: 'system', content: kn === ans ? C.tutorCfg.right_note : C.tutorCfg.wrong_note }];
+    const hit = !num && t.options && t.options.find((o) => { const ot = o.t.toLowerCase(); return k.includes(ot) || (k.length >= 2 && ot.startsWith(k)); });
+    if (hit) return [{ role: 'system', content: hit.ok ? C.tutorCfg.right_note : C.tutorCfg.wrong_note }];
+    return [];
+  }
+  function openTutor() {
+    const ts = P.ts; ts.menu = false; if (!ts.help.includes('tutor')) ts.help.push('tutor');
+    ts.tutor = { id: Date.now(), msgs: [{ role: 'assistant', content: C.tutorCfg.opener }], busy: false, turns: 0, leaks: 0 };
+    renderPlayer();
+  }
+  async function tutorSend(text) {
+    const ts = P.ts, tu = ts.tutor, t = P.steps[P.i];
+    if (!text.trim() || tu.busy) return;
+    tu.msgs.push({ role: 'user', content: text.trim() }); tu.turns++; tu.busy = true; renderPlayer();
+    let reply;
+    const vn = verdictNote(text, t);
+    const stuck = /не\s*(по)?ним|не\s*знаю|не\s*получ|не\s*могу/i.test(text);
+    if (vn.length && vn[0].content === C.tutorCfg.right_note) reply = { text: C.tutorCfg.right_done, leak: false }; // верно: подтверждает код, не модель
+    else if (stuck && !tu.stuckOnce) { tu.stuckOnce = true; reply = { text: C.tutorCfg.stuck_intro + ' ' + ((t.hints && t.hints[0]) || C.tutorCfg.stuck_fallback), leak: false }; } // самый важный момент: методическая подсказка из урока
+    else if (tu.turns > C.tutorCfg.max_turns) reply = { text: 'Мы долго разбираем эту задачу. Позови маму, вы разберёте её вместе. Или пропусти пока.', leak: false };
+    else {
+      try {
+        const r = await fetch(tutorSet().url + '/api/chat', { method: 'POST', body: JSON.stringify({ model: tutorSet().model, stream: false, think: false,
+          options: { temperature: 0.4, num_predict: 160 }, messages: [{ role: 'system', content: tutorSystem(t) }, ...tu.msgs, ...vn] }) });
+        const j = await r.json(); reply = guard(j.message && j.message.content, t);
+      } catch (e) { reply = { text: 'Связь с помощником пропала. Давай дальше с подсказками.', leak: false }; tutorReady = false; }
+    }
+    if (P && P.ts === ts) { tu.msgs.push({ role: 'assistant', content: reply.text, leak: reply.leak }); tu.busy = false;
+      S.tutor = (S.tutor || []).filter((x) => x.id !== tu.id).concat([{ id: tu.id, t: Date.now(), lesson: P.lesson.id, q: t.q, msgs: tu.msgs }]).slice(-200); save(); renderPlayer();
+      const inp = document.getElementById('tutin'); if (inp) inp.focus(); }
+  }
+  function tutorHtml() {
+    const tu = P.ts.tutor; if (!tu) return '';
+    return `<div class="card" style="margin-top:16px"><div class="tag">Разбираем вместе с Никой</div>
+      ${tu.msgs.map((m) => `<div style="display:flex;justify-content:${m.role === 'user' ? 'flex-end' : 'flex-start'};margin:8px 0">
+        <div style="max-width:80%;padding:10px 14px;border-radius:16px;background:${m.role === 'user' ? 'var(--violet-l)' : 'var(--sun-l)'}">${m.role === 'user' ? '' : '🦉 '}${esc(m.content)}</div></div>`).join('')}
+      ${tu.busy ? '<p class="muted small">Ника думает…</p>' : ''}
+      <div class="row" style="margin-top:10px"><input class="field" id="tutin" style="flex:1;min-width:200px" placeholder="Напиши или скажи" autocomplete="off">
+        <button class="btn soft small" data-act="voice" data-target="tutin">🎤 Сказать</button><button class="btn small" data-act="tutsend">Отправить</button></div>
+      <div class="row" style="margin-top:8px"><button class="btn soft small" data-tutq="Не понимаю">Не понимаю</button><button class="btn soft small" data-tutq="Можно ещё подсказку?">Ещё подсказку</button></div></div>`;
+  }
+
+  // ---------- голос: Whisper в браузере (на видеокарте), запасной вариант: распознавание браузера ----------
+  let asr = null, asrLoading = null;
+  async function loadWhisper() {
+    if (asr) return asr;
+    if (!asrLoading) asrLoading = (async () => {
+      const tf = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.1');
+      // модель лежит на нашем же сайте (сайт моделей из России открывается ненадёжно); после первой загрузки она в кэше и работает офлайн
+      tf.env.allowRemoteModels = false; tf.env.allowLocalModels = true; tf.env.localModelPath = new URL('models/', location.href).href;
+      asr = await tf.pipeline('automatic-speech-recognition', 'onnx-community/whisper-base', { device: 'wasm', dtype: 'q8' });
+      return asr;
+    })();
+    return asrLoading;
+  }
+  async function transcribe(blob) {
+    const pipe = await loadWhisper();
+    const ctx = new AudioContext({ sampleRate: 16000 });
+    const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+    const out = await pipe(buf.getChannelData(0), { language: 'russian', task: 'transcribe' });
+    return (out.text || '').trim();
+  }
+  let rec = null;
+  async function toggleVoice(btn) {
+    const target = document.getElementById(btn.dataset.target);
+    if (rec) { rec.stop(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks = []; rec = new MediaRecorder(stream);
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      rec.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop()); rec = null;
+        btn.textContent = '⏳ Распознаю…'; btn.disabled = true;
+        try { const txt = await transcribe(new Blob(chunks, { type: 'audio/webm' })); if (target) { target.value = (target.value ? target.value + ' ' : '') + txt; target.dispatchEvent(new Event('input')); } }
+        catch (e) { btn.textContent = 'Не вышло, напиши'; return; }
+        btn.textContent = '🎤 Сказать'; btn.disabled = false; if (target) target.focus();
+      };
+      rec.start(); btn.textContent = '⏹ Готово'; loadWhisper().catch(() => {});
+    } catch (e) { btn.textContent = 'Нет микрофона'; }
   }
 
   // ---------- роутер ----------
@@ -1053,12 +1221,12 @@
       if (page !== 'onboarding') { location.hash = '#/onboarding/' + (S.name ? 2 : 1); return; }
       app.innerHTML = viewOnboarding(+arg); return;
     }
-    if (page !== 'parent') parentOk = false;
+    if (page !== 'parent' && page !== 'path') parentOk = false;
     if (page === 'lesson') { startLesson(arg); return; }
     if (page === 'review') { startReview(); return; }
     if (page === 'practice') { startPractice(arg); return; }
     P = null;
-    const views = { today: viewToday, nowant: viewNoWant, map: () => viewMap(arg), skills: viewSkills, homework: viewHomework, parent: viewParent };
+    const views = { path: viewPath, today: viewToday, nowant: viewNoWant, map: () => viewMap(arg), skills: viewSkills, homework: viewHomework, parent: viewParent };
     app.innerHTML = (views[page] || viewToday)();
     window.scrollTo(0, 0);
     if (!views[page] || page === 'today') { const iv = setInterval(() => { if (!P) app.innerHTML = viewToday(); }, 60000); cleanup = () => clearInterval(iv); }
@@ -1069,6 +1237,7 @@
   app.addEventListener('click', (e) => {
     const el = e.target.closest('button, a, [data-go]'); if (!el) return;
     if (el.dataset.say != null) { speak(el.dataset.say, el.dataset.lang); return; }
+    if (el.dataset.act === 'voice') { toggleVoice(el); return; }
     if (el.dataset.go) { location.hash = el.dataset.go; return; }
     if (el.dataset.act === 'syll') { S.set.syll = !S.set.syll; save(); P ? renderPlayer() : route(); return; }
     if (P) { onPlayerClick(el); return; }
@@ -1127,6 +1296,12 @@
       const url = URL.createObjectURL(new Blob([JSON.stringify(S, null, 1)], { type: 'application/json' }));
       const a = document.createElement('a'); a.href = url; a.download = `nika-progress-${today()}.json`; a.click(); return;
     }
+    if (act === 'tutsave') {
+      S.set.tutor = { url: document.getElementById('turl').value.trim().replace(/\/$/, ''), model: document.getElementById('tmodel').value.trim() }; save();
+      const st = document.getElementById('tstat'); st.textContent = 'Проверяю…';
+      checkTutor().then((ms) => { st.textContent = ms === null ? '❌ Не отвечает. Запущен ли Ollama и разрешён ли адрес сайта (OLLAMA_ORIGINS)?' : tutorReady ? `✅ На связи, модель ${tutorSet().model}` : `⚠️ Ollama отвечает, но модели ${tutorSet().model} нет. Есть: ${ms.map((m) => m.name).join(', ') || 'ничего'}`; });
+      return;
+    }
     if (act === 'setrange') {
       const a = document.getElementById('rfrom').value, b = document.getElementById('rto').value, m = document.getElementById('rmode').value;
       if (!a || !b || a > b) { alert('Выберите даты «с» и «по».'); return; }
@@ -1156,6 +1331,7 @@
     }
   });
   document.addEventListener('keydown', (e) => {
+    if (e.target.id === 'tutin' && e.key === 'Enter') { tutorSend(e.target.value); return; }
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') { if (e.key === 'Enter' && e.target.id === 'nm') document.querySelector('[data-act="name"]').click(); return; }
     if (!P) return;
     const t = P.steps[P.i];
@@ -1172,7 +1348,7 @@
   // ---------- старт ----------
   S = load();
   document.body.classList.toggle('syll', S.set.syll);
-  unlock().then(loadContent).then((c) => { C = c; pickedWorlds = S.worlds.slice(); route(); flushOutbox(); })
+  unlock().then(loadContent).then((c) => { C = c; pickedWorlds = S.worlds.slice(); route(); flushOutbox(); checkTutor(); })
     .catch((e) => { app.innerHTML = `<div class="boot">Не получилось загрузить уроки. Проверь интернет и обнови страницу.<br><small>${esc(e.message)}</small></div>`; });
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
