@@ -142,13 +142,14 @@
     const get = (f) => BUNDLE ? Promise.resolve(BUNDLE.files[f]).then((x) => { if (!x) throw new Error(f); return x; })
       : fetch('content/' + f).then((r) => { if (!r.ok) throw new Error(f); return r.json(); });
     const idx = await get('index.json');
-    const [program, words, errors, modes, calendar, worldsData, readwords, catalog, week, lines, roadmap, tutor, ...files] = await Promise.all([get(idx.program), get(idx.words), get(idx.errors), get(idx.modes), get(idx.calendar), get(idx.worlds), get(idx.readwords), get(idx.catalog), get(idx.week), get(idx.lines), get(idx.roadmap), get(idx.tutor), ...idx.lessons.map(get)]);
+    const [program, words, errors, modes, calendar, worldsData, readwords, catalog, week, lines, roadmap, tutor, ...rest] = await Promise.all([get(idx.program), get(idx.words), get(idx.errors), get(idx.modes), get(idx.calendar), get(idx.worlds), get(idx.readwords), get(idx.catalog), get(idx.week), get(idx.lines), get(idx.roadmap), get(idx.tutor), ...idx.curricula.map(get), ...idx.lessons.map(get)]);
+    const curricula = rest.slice(0, idx.curricula.length), files = rest.slice(idx.curricula.length);
     const lessons = files.flatMap((f) => f.lessons);
     const skills = program.skills;
     const skillById = Object.fromEntries(skills.map((s) => [s.id, s]));
     const wordById = Object.fromEntries(words.words.map((w) => [w.id, w]));
     return { program, tracks: program.tracks, worlds: program.worlds, skills, skillById, lessons, words: words.words, wordById, errors, modes, calendar: calendar.days,
-      config: (BUNDLE && BUNDLE.files['config.json']) || {}, worldsData, readwords, catalog, week, lines: lines.events, roadmap, tutorCfg: tutor };
+      config: (BUNDLE && BUNDLE.files['config.json']) || {}, worldsData, readwords, catalog, week, lines: lines.events, roadmap, tutorCfg: tutor, curricula };
   }
   const track = (id) => C.tracks.find((t) => t.id === id) || { id, title: id, emoji: '•', color: '#fff' };
   const skillOf = (l) => C.skillById[l.skill];
@@ -173,12 +174,12 @@
     return miss.length ? 'Откроется после: ' + miss.join(', ') : 'Сначала предыдущий урок';
   };
   function nextInTrack(tid) {
-    const ls = C.lessons.filter((l) => skillOf(l).track === tid);
+    const ls = C.lessons.filter((l) => skillOf(l).track === tid && !l.control);
     return ls.find((l) => !l.repeat && lessonOpen(l) && !isDone(l)) || ls.find((l) => l.repeat && lessonOpen(l)) || null;
   }
   function mainPick() {
     const pref = ['reading', 'math', 'reading', 'math', 'reading', 'words', 'math'][new Date().getDay()];
-    const cand = C.lessons.filter((l) => !l.repeat && lessonOpen(l) && !isDone(l) && ['reading', 'math', 'words'].includes(skillOf(l).track));
+    const cand = C.lessons.filter((l) => !l.repeat && !l.control && lessonOpen(l) && !isDone(l) && ['reading', 'math', 'words'].includes(skillOf(l).track));
     cand.sort((a, b) => (PRIO[skillOf(a).priority] - PRIO[skillOf(b).priority]) ||
       ((skillOf(a).track === pref ? 0 : 1) - (skillOf(b).track === pref ? 0 : 1)) || (C.lessons.indexOf(a) - C.lessons.indexOf(b)));
     return cand[0] || null;
@@ -266,6 +267,19 @@
       return { type: 'input', q: 'На сколько больше?', text: `У ${H.hero === 'Ника' ? 'Ники' : 'героя'} ${a} ${plural(a, H.item)}, у Луны ${b}. На сколько больше у первого?`, answer: String(a - b),
         errs: off1(a - b, { [a + b]: 'wrong_operation' }), hints: ['«На сколько больше» это из большего вычесть меньшее.', `${a} − ${b}`] };
     },
+    'm.add100': (d) => {
+      const kind = pick(d >= 2 ? ['t+', 't-', 'u+', 'u-'] : ['t+', 't-']);
+      const a = rint(2, 8) * 10 + rint(1, 9), t = rint(1, 4) * 10, u = rint(1, 9);
+      if (kind === 't+') return { type: 'input', q: `${a} + ${t} = …`, answer: String(a + t), errs: { [a + t - 10]: 'off_by_one', [a + t + 10]: 'off_by_one', [a + u]: 'digit_confusion' }, hints: ['Десятки складываем с десятками, единицы остаются.', `${a}: ${Math.floor(a / 10)} дес. и ${a % 10} ед. Прибавь ${t / 10} дес.`] };
+      if (kind === 't-') return { type: 'input', q: `${a} − ${t} = …`, answer: String(a - t), errs: { [a - t - 10]: 'off_by_one', [a - t + 10]: 'off_by_one' }, hints: ['Десятки вычитаем из десятков, единицы остаются.', `${a}: ${Math.floor(a / 10)} дес. и ${a % 10} ед. Убери ${t / 10} дес.`] };
+      if (kind === 'u+') { const x = rint(2, 8) * 10 + rint(1, 5); return { type: 'input', q: `${x} + ${u} = …`, answer: String(x + u), errs: off1(x + u), hints: [`Сначала добери до круглого числа: ${x} + ${10 - (x % 10)} = ${x + 10 - (x % 10)}.`, 'Потом прибавь остаток.'] }; }
+      const x = rint(3, 9) * 10 + rint(0, 4); return { type: 'input', q: `${x} − ${u} = …`, answer: String(x - u), errs: off1(x - u), hints: [`Сначала отними единицы от числа: ${x % 10 ? x % 10 : 'иди через десяток'}.`, 'Круглое число отнять проще.'] };
+    },
+    'ru.syll': (d) => {
+      const W = C.readwords.words.filter(([w]) => d === 1 ? w.length <= 5 : w.length >= 5);
+      const [w, p] = pick(W); const n = (w.match(/[аеёиоуыэюя]/gi) || []).length;
+      return { type: 'choice', q: `Сколько слогов в слове «${w}»? Хлопни ладошами.`, pic: p, options: shuffle([n - 1, n, n + 1].filter((x) => x >= 1).map((x) => x === n ? { t: String(x), ok: true } : { t: String(x), err: 'off_by_one' })), hints: ['Слогов столько, сколько гласных звуков.', 'Хлопай на каждый гласный: а, о, у, ы, э, я, ё, ю, е, и.'] };
+    },
     'rd.tech': (d) => {
       const W = C.readwords.words.filter(([w]) => (d === 1 ? w.length <= 4 : d === 2 ? w.length >= 4 && w.length <= 6 : w.length >= 6));
       const [w, p] = pick(W);
@@ -287,6 +301,29 @@
     newTask();
   }
 
+  // ---------- динамика чтения: скорость (приблизительно) и контрольные истории ----------
+  function readSpeed(fromDay, toDay) {
+    const xs = S.log.filter((x) => x.rw && x.rms).filter((x) => { const d = dstr(new Date(x.t)); return d >= fromDay && d <= toDay; });
+    if (xs.length < 3) return { n: xs.length, wpm: null };
+    const w = xs.reduce((a, x) => a + x.rw, 0), ms = xs.reduce((a, x) => a + x.rms, 0);
+    return { n: xs.length, wpm: Math.round(w / (ms / 60000)) };
+  }
+  function controlRuns() {
+    const byLesson = {};
+    for (const x of S.log) if (x.lesson && x.lesson.startsWith('ctl-') && !x.info) { const k = x.lesson + '|' + dstr(new Date(x.t)); (byLesson[k] = byLesson[k] || []).push(x); }
+    return Object.entries(byLesson).map(([k, xs]) => ({ lesson: k.split('|')[0], date: k.split('|')[1], n: xs.length, ok: xs.filter(isOk).length, indep: xs.filter(isIndep).length, help: xs.filter((x) => (x.help || []).length).length,
+      wpm: (() => { const r = xs.filter((x) => x.rw); return r.length ? Math.round(r.reduce((a, x) => a + x.rw, 0) / (r.reduce((a, x) => a + x.rms, 0) / 60000)) : null; })() }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }
+  // покрытие карты программы: какая доля обязательных результатов закрыта навыками на уровне «получается»
+  function coverage(cur) {
+    return cur.items.map((it) => {
+      const ss = it.skills.filter((id) => C.skillById[id]);
+      const lv = ss.map((id) => lvl(id)); const started = ss.some((id) => mastery(id).n);
+      const state = !ss.length ? 'none' : lv.every((v) => v >= 3) ? 'ok' : started ? 'partial' : 'todo';
+      return Object.assign({}, it, { state });
+    });
+  }
   // ---------- самостоятельность за 14 дней ----------
   function selfStats() {
     const since = addDays(-13), ds = Object.entries(S.days).filter(([d, x]) => d >= since && x.started);
@@ -301,8 +338,9 @@
 
   // ---------- учебный день: режимы, рабочее время, план, отчёты ----------
   const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
-  const modeFor = (d) => S.calendar[d] || (C.calendar[d] && C.calendar[d].mode) || C.modes.week[String(new Date(d + 'T12:00').getDay())] || 'school';
-  const modeInfo = (m) => C.modes.modes[m] || C.modes.modes.school;
+  const intl = () => S.set.program === 'intl';
+  const modeFor = (d) => S.calendar[d] || (C.calendar[d] && C.calendar[d].mode) || (intl() ? C.modes.week_intl : C.modes.week)[String(new Date(d + 'T12:00').getDay())] || 'school';
+  const modeInfo = (m) => { const x = C.modes.modes[m] || C.modes.modes.school; return intl() && x.plan_intl ? Object.assign({}, x, { plan: x.plan_intl, minutes: x.minutes_intl || x.minutes }) : x; };
   const dayNote = (d) => (C.calendar[d] && C.calendar[d].note) || '';
   const day = () => S.days[today()];
   const minutesSince = (t) => Math.floor((Date.now() - t) / 60000);
@@ -330,7 +368,7 @@
     if (l) { used.add(l.id); return { kind: 'lesson', lesson: l.id, title: l.title, track: tid, why: 'новая тема', done: false }; }
     const weak = ss.filter((s) => GEN[s.id] && !used.has('p:' + s.id)).sort((a, b) => lvl(a.id) - lvl(b.id))[0];
     if (weak) { used.add('p:' + weak.id); return { kind: 'practice', skill: weak.id, title: 'Тренировка: ' + weak.title, track: tid, why: 'всё пройдено, держим форму', done: false }; }
-    const rep = C.lessons.find((x) => x.repeat && skillOf(x).track === tid && lessonOpen(x) && !used.has(x.id));
+    const rep = C.lessons.find((x) => x.repeat && !x.control && skillOf(x).track === tid && lessonOpen(x) && !used.has(x.id));
     if (rep) { used.add(rep.id); return { kind: 'lesson', lesson: rep.id, title: rep.title, track: tid, why: 'задание, которое можно делать много раз', done: false }; }
     return null;
   }
@@ -338,6 +376,14 @@
     const steps = [], used = new Set(), missing = [], notes = [];
     const push = (st) => { if (st) steps.push(st); return !!st; };
     if (dueSkills().length || dueWords().length) steps.push({ kind: 'review', title: 'Вспомним', track: 'review', why: 'подошёл срок повторения', done: false });
+    // контрольная история раз в две недели: сравниваем динамику (а не оцениваем)
+    const ctlList = C.lessons.filter((l) => l.control);
+    const lastCtl = Math.max(0, ...ctlList.map((l) => S.lessons[l.id] && S.lessons[l.id].at ? +new Date(S.lessons[l.id].at) : 0));
+    const daysUsed = Object.values(S.days).filter((x) => x.started && x.steps && x.steps.length).length;
+    if (ctlList.length && daysUsed >= 3 && mode !== 'weekend' && (!lastCtl || Date.now() - lastCtl > 13 * 864e5) && energy === 'ok') {
+      const nxtC = ctlList.slice().sort((a, b) => ((S.lessons[a.id] || {}).times || 0) - ((S.lessons[b.id] || {}).times || 0))[0];
+      used.add(nxtC.id); steps.push({ kind: 'lesson', lesson: nxtC.id, title: nxtC.title, track: 'reading', why: 'раз в две недели: сравниваем с прошлым разом, как растёт понимание', done: false });
+    }
     // правило 4: часто просит прочитать за неё → техника чтения
     const r7 = recent(7), readHelp = r7.filter((x) => (x.help || []).includes('reading')).length;
     if (r7.length >= 8 && readHelp / r7.length > 0.3 && skillOpen(C.skillById['rd.tech'])) { used.add('p:rd.tech'); steps.push({ kind: 'practice', skill: 'rd.tech', title: 'Тренировка: читаю слово точно', track: 'reading', why: `часто просит прочитать за неё (${readHelp} из ${r7.length})`, done: false }); }
@@ -396,7 +442,7 @@
     return { v: 1, kind: 'daily', date: d, sent: new Date().toISOString(), mode: dy.mode || modeFor(d), started_by: dy.by || null, energy: dy.energy || null,
       minutes: mins, time_up: !!dy.timeUp, steps: (dy.steps || []).map((x) => ({ title: x.title, track: x.track, done: !!x.done, why: x.why || '' })), missing: dy.missing || [], notes: dy.notes || [],
       mastery: C.skills.filter((s) => mastery(s.id).n).map((s) => { const m = mastery(s.id); return { id: s.id, title: s.title, track: s.track, priority: s.priority, n: m.n, acc: m.acc, indep: m.indep, diff: m.diff, stab: m.stab, lvl: lvl(s.id), verdict: masteryVerdict(s.id) }; }),
-      self: selfStats(), focus: weekFocus(),
+      self: selfStats(), focus: weekFocus(), read: readSpeed(d, d), control: controlRuns().filter((c) => c.date === d),
       tutor: (S.tutor || []).filter((x) => dstr(new Date(x.t)) === d),
       extra: dy.extraLesson ? { lesson: dy.extraLesson, done: !!dy.extraDone } : null, refused: dy.refused || null,
       lessons: Object.values(byLesson), errors_legend: C.errors, words_in_work: Object.keys(S.words).length };
@@ -716,7 +762,7 @@
   }
   function newTask() {
     const t = P.steps[P.i];
-    P.ts = { wrongs: 0, hints: 0, revealed: false, solved: false, errs: [], listenedAfterWrong: false, input: '', wrongOpts: [], ans: [], pool: [], fixed: 0, matched: [], sel: null,
+    P.ts = { tFirst: 0, wrongs: 0, hints: 0, revealed: false, solved: false, errs: [], listenedAfterWrong: false, input: '', wrongOpts: [], ans: [], pool: [], fixed: 0, matched: [], sel: null,
       help: [], audioOn: false, syllOn: false, menu: false, instr: null, wordHelp: null, t0: Date.now() };
     if (t.type === 'order') P.ts.pool = shuffle(t.items.map((x, i) => ({ x, i })));
     if (t.type === 'choice') P.ts.opts = t.keepOrder ? t.options : shuffle(t.options);
@@ -825,6 +871,13 @@
   // реакции Ники и Луны на поведение (не болтовня: одна реплика на событие)
   const react = (ev) => { const e = C.lines[ev]; return e ? { who: e.who, mood: e.mood, text: pick(e.lines) } : null; };
   let idleTimer = null;
+  // скорость чтения: слов в минуту по времени до первого ответа; только когда читала сама и текст не короткий
+  function readStat(t, ts) {
+    const w = (t.text || '').trim().split(/\s+/).filter(Boolean).length;
+    if (t.lang === 'en' || w < 12 || ts.audioOn || !ts.tFirst || t.big) return {};
+    const ms = ts.tFirst - (ts.t0 || ts.tFirst); if (ms < 3000 || ms > 240000) return {};
+    return { rw: w, rms: ms };
+  }
   const PAIR_COLORS = [['#DDF7EA', '#2FBF7F'], ['#FFE9DC', '#FF9A5B'], ['#DDF1FF', '#4AA8E8'], ['#FFF4C9', '#E0A800'], ['#FFE3EE', '#F06A9B'], ['#EDE7FF', '#7C5CFF']];
   const PRAISE_CLEAN = ['Верно.', 'Точно.', 'Да, так и есть.', 'Правильно, и без подсказок.', 'В точку.'];
   const PRAISE_RETRY = ['Получилось со второй попытки. Так и учатся.', 'Ты не сдалась и нашла.', 'Да! Ошибка помогла найти правильный путь.'];
@@ -845,7 +898,7 @@
     const t = P.steps[P.i], ts = P.ts; ts.solved = true;
     P.results.push({ t: Date.now(), lesson: P.lesson.id, skill: P.mode === 'lesson' || P.mode === 'practice' ? P.lesson.skill : t.reviewSkill || null, word: t.wordRef || t.reviewWord || null, step: P.i,
       wrongs: ts.wrongs, hints: ts.hints, revealed: ts.revealed, cond: ts.listenedAfterWrong, errs: ts.errs, review: P.mode === 'review', help: ts.help, audio: ts.audioOn,
-      d: t.d || P.diff || 1, fmt: t.type, ms: Date.now() - (ts.t0 || Date.now()), gen: !!t.gen });
+      d: t.d || P.diff || 1, fmt: t.type, ms: Date.now() - (ts.t0 || Date.now()), gen: !!t.gen, ...readStat(t, ts) });
     const hardAlone = !ts.wrongs && !ts.hints && !ts.help.length && (t.d || P.diff || 1) >= 2;
     const rr = hardAlone ? react('hard_solved_alone') : ts.wrongs && !ts.hints && !ts.help.length ? react('fixed_after_error') : null;
     const msg = rr ? rr.text : ts.revealed || ts.hints ? pick(PRAISE_HINT) : ts.wrongs ? pick(PRAISE_RETRY) : pick(PRAISE_CLEAN);
@@ -914,6 +967,7 @@
 
   function onPlayerClick(el) {
     const t = P.steps[P.i], ts = P.ts;
+    if (!ts.tFirst && !['syll', 'helpmenu', 'exit'].includes(el.dataset.act) && el.dataset.say == null) ts.tFirst = Date.now(); // момент, когда закончила читать и начала отвечать
     if (el.dataset.opt != null && t.type === 'choice' && !ts.solved) {
       const i = +el.dataset.opt, o = ts.opts[i];
       if (o.ok) solved(); else { ts.wrongOpts.push(i); wrong(o.err); }
@@ -1013,6 +1067,30 @@
       ${dy && dy.missing && dy.missing.length ? `<p class="small">⚠️ Для этих предметов пока нет уроков, они пропущены: ${esc(dy.missing.join(', '))}.</p>` : ''}
       <div class="row" style="margin-top:8px"><button class="btn small" data-act="sendreport">📤 Отправить отчёт за сегодня</button><button class="btn soft small" data-act="savereport">💾 Сохранить отчёт файлом</button></div>
       <p class="muted small">В очереди: ${S.outbox.length}. Последняя отправка: ${S.lastSend ? new Date(S.lastSend).toLocaleString('ru-RU') : 'ещё не было'}. ${C.config.reports ? '' : 'Почтовый ящик пока не подключён: отчёты копятся здесь и уйдут, когда подключим.'}</p></div>`;
+
+    // программа: Россия или международная
+    h += `<h2>Программа</h2><div class="card"><div class="row"><b>Сейчас учимся по:</b>
+      <select data-program><option value="ru" ${!intl() ? 'selected' : ''}>Российская программа (школьные дни + выходные)</option><option value="intl" ${intl() ? 'selected' : ''}>Международная (после переезда: полная учёба в будни, английский вдвое больше)</option></select></div>
+      <p class="muted small">Переключение меняет расписание недели и порядок предметов. Навыки Киры и её прогресс сохраняются.</p></div>`;
+
+    // покрытие карт программ
+    h += '<h2>Покрытие программ</h2><div class="cards">';
+    for (const cur of C.curricula) {
+      const cv = coverage(cur), ok = cv.filter((x) => x.state === 'ok').length, part = cv.filter((x) => x.state === 'partial').length, none = cv.filter((x) => x.state === 'none').length;
+      h += `<div class="card"><div class="tag">${esc(cur.title)}</div><div style="font-size:30px;font-weight:900">${ok} из ${cv.length} закрыто</div>
+        <div class="bar" style="margin:8px 0"><i style="width:${Math.round(ok / cv.length * 100)}%"></i></div>
+        <div class="muted small">в работе: ${part} · пока без уроков: ${none}</div>
+        <details style="margin-top:8px"><summary class="small">Что именно</summary>${cv.map((x) => `<div class="small" style="margin:4px 0">${{ ok: '✅', partial: '🌿', todo: '○', none: '·' }[x.state]} <b>${esc(x.grade)}</b> ${esc(x.text)}</div>`).join('')}</details>
+        ${cur.note ? `<p class="muted small">${esc(cur.note)}</p>` : ''}</div>`;
+    }
+    h += '</div>';
+
+    // чтение: скорость и контрольные истории
+    const rs1 = readSpeed(addDays(-6), today()), rs2 = readSpeed(addDays(-13), addDays(-7)), runs = controlRuns();
+    h += `<h2>Чтение: динамика</h2><div class="card"><div class="row"><div><div class="tag">За 7 дней</div><div style="font-size:34px;font-weight:900">${rs1.wpm == null ? 'мало данных' : '≈' + rs1.wpm + ' слов/мин'}</div></div>
+      <div><div class="tag">Неделей раньше</div><div style="font-size:34px;font-weight:900">${rs2.wpm == null ? 'мало данных' : '≈' + rs2.wpm}</div></div></div>
+      <p class="muted small">Скорость считается по времени до первого ответа на задании с текстом (читала сама, без озвучки), поэтому это ориентир, а не замер. Цель по программе: не меньше 40 слов в минуту к концу 2 класса, но главное, чтобы внимание освобождалось для понимания. Нужно хотя бы 3 задания с текстом.</p>
+      ${runs.length ? `<table class="ptable"><tr><th>Контрольная история</th><th>Дата</th><th>Верно</th><th>Сама</th><th>Помощь</th><th>Слов/мин</th></tr>${runs.map((r) => `<tr><td>${esc((C.lessons.find((l) => l.id === r.lesson) || {}).title || r.lesson)}</td><td>${r.date}</td><td>${r.ok} из ${r.n}</td><td>${r.indep}</td><td>${r.help}</td><td>${r.wpm || '—'}</td></tr>`).join('')}</table>` : '<p class="small">Контрольная история появится в плане дня примерно через 3 дня занятий, потом раз в две недели.</p>'}</div>`;
 
     // самостоятельность: главная цель первых трёх месяцев
     const ss = selfStats();
@@ -1322,6 +1400,7 @@
     const el = e.target;
     if (el.dataset.manual) { const s = sk(el.dataset.manual); s.manual = el.value === '' ? undefined : +el.value; save(); app.innerHTML = viewParent(); return; }
     if (el.dataset.act === 'unlock') { S.parent.unlockAll = el.checked; save(); return; }
+    if (el.dataset.program != null) { S.set.program = el.value; save(); route(); return; }
     if (el.dataset.daymode) { const d = el.dataset.daymode; S.calendar[d] = el.value; const dy = S.days[d]; if (dy && !dy.started) dy.mode = el.value; save(); app.innerHTML = viewParent(); return; }
     if (el.dataset.act === 'reminded') { const d = today(); S.parent.remindOn = el.checked ? d : ''; if (S.days[d]) S.days[d].by = el.checked ? 'mom' : 'kira'; save(); return; }
     if (el.dataset.act === 'file' && el.files[0]) { showShot(el.files[0]); return; }
