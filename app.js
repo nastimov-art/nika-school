@@ -329,7 +329,7 @@
     const since = addDays(-13), ds = Object.entries(S.days).filter(([d, x]) => d >= since && x.started);
     const n = ds.length, by = ds.filter(([, x]) => x.by === 'kira').length, fin = ds.filter(([, x]) => x.end && !x.refused && !x.timeUp).length;
     const ref = ds.filter(([, x]) => x.refused).length, extra = ds.filter(([, x]) => x.extraLesson).length;
-    const mins = ds.map(([, x]) => x.end ? Math.round((x.end - x.started) / 60000) : 0).filter(Boolean);
+    const mins = ds.map(([, x]) => Math.round(activeMs(x) / 60000)).filter(Boolean);
     const logs = S.log.filter((x) => dstr(new Date(x.t)) >= since && !x.info);
     const helpAsk = logs.filter((x) => (x.help || []).length).length, hard = logs.filter((x) => x.revealed || x.wrongs >= 2).length;
     return { days: n, started_self: by, finished: fin, refused: ref, extra, avg_min: mins.length ? Math.round(mins.reduce((a, b) => a + b, 0) / mins.length) : 0,
@@ -343,7 +343,20 @@
   const modeInfo = (m) => { const x = C.modes.modes[m] || C.modes.modes.school; return intl() && x.plan_intl ? Object.assign({}, x, { plan: x.plan_intl, minutes: x.minutes_intl || x.minutes }) : x; };
   const dayNote = (d) => (C.calendar[d] && C.calendar[d].note) || '';
   const day = () => S.days[today()];
-  const minutesSince = (t) => Math.floor((Date.now() - t) / 60000);
+  // Активное время: растёт только когда Кира что-то делает (нажимает, пишет, говорит).
+  // Если страница просто открыта, время не идёт: между двумя действиями засчитывается не больше 90 секунд.
+  const IDLE_CAP = 90000;
+  let lastSave = 0;
+  function touch() {
+    const dy = S && S.days && S.days[today()]; if (!dy || !dy.started || dy.end) return;
+    const now = Date.now();
+    if (dy.active == null) { dy.active = 0; dy.lastAct = now; }
+    dy.active += Math.min(now - (dy.lastAct || now), IDLE_CAP); dy.lastAct = now;
+    if (now - lastSave > 20000) { lastSave = now; save(); }
+  }
+  const activeMs = (dy) => (dy && dy.active != null ? dy.active : 0);
+  const activeMin = (dy) => Math.floor(activeMs(dy) / 60000);
+  ['click', 'keydown', 'input', 'touchstart'].forEach((ev) => document.addEventListener(ev, touch, true));
 
   // ---------- адаптивный подбор: что Кире делать дальше и почему ----------
   const weekFocus = () => (C.week && C.week.focus) || [];
@@ -421,7 +434,7 @@
     const dy = day(); if (!dy || !dy.started || dy.end || !dy.steps) return;
     const allDone = dy.steps.every((x) => x.done);
     const cap = modeInfo(dy.mode).minutes;
-    const timeUp = cap && minutesSince(dy.started) >= cap && dy.steps.some((x) => x.done);
+    const timeUp = cap && activeMin(dy) >= cap && dy.steps.some((x) => x.done);
     if (allDone || timeUp) { dy.end = Date.now(); dy.timeUp = !allDone; save(); enqueueReport(today()); }
   }
 
@@ -438,7 +451,7 @@
       (x.help || []).forEach((h) => (L.help[h] = (L.help[h] || 0) + 1));
       (x.errs || []).forEach((e) => (L.errs[e] = (L.errs[e] || 0) + 1));
     }
-    const mins = dy.started ? Math.round(((dy.end || Date.now()) - dy.started) / 60000) : 0;
+    const mins = Math.round(activeMs(dy) / 60000);
     return { v: 1, kind: 'daily', date: d, sent: new Date().toISOString(), mode: dy.mode || modeFor(d), started_by: dy.by || null, energy: dy.energy || null,
       minutes: mins, time_up: !!dy.timeUp, steps: (dy.steps || []).map((x) => ({ title: x.title, track: x.track, done: !!x.done, why: x.why || '' })), missing: dy.missing || [], notes: dy.notes || [],
       mastery: C.skills.filter((s) => mastery(s.id).n).map((s) => { const m = mastery(s.id); return { id: s.id, title: s.title, track: s.track, priority: s.priority, n: m.n, acc: m.acc, indep: m.indep, diff: m.diff, stab: m.stab, lvl: lvl(s.id), verdict: masteryVerdict(s.id) }; }),
@@ -571,7 +584,7 @@
 
     // план дня
     const nx = nextStepOf(dy);
-    const mins = minutesSince(dy.started);
+    const mins = activeMin(dy);
     const icon = { review: '🔁', break: '🤸', explore: '🔭', code: '🤖', music: '🎵', feelings: '💛', reading: '📖', math: '🔢', russian: '✏️', words: '🔤', english: '🎧', world: '🌍', logic: '🧩', create: '🎨', homework: '📷' };
     let list = dy.steps.map((x) => `<div class="skill" style="${x === nx ? 'outline:4px solid var(--violet)' : ''}"><div class="lv">${x.done ? '✅' : icon[x.track] || '•'}</div>
       <div><div>${esc(x.title)}</div><div class="st">${x.done ? 'готово' : x === nx ? 'сейчас' : 'потом'}</div></div></div>`).join('');
@@ -761,6 +774,7 @@
     newTask();
   }
   function newTask() {
+    if (P.a0 == null) P.a0 = activeMs(day());
     const t = P.steps[P.i];
     P.ts = { tFirst: 0, wrongs: 0, hints: 0, revealed: false, solved: false, errs: [], listenedAfterWrong: false, input: '', wrongOpts: [], ans: [], pool: [], fixed: 0, matched: [], sel: null,
       help: [], audioOn: false, syllOn: false, menu: false, instr: null, wordHelp: null, t0: Date.now() };
@@ -913,7 +927,8 @@
     finish();
   }
   function finish() {
-    const r = P.results; const ms = Date.now() - P.t0;
+    const r = P.results; const dy0 = day();
+    const ms = dy0 && dy0.active != null && P.a0 != null ? Math.max(0, dy0.active - P.a0) : Math.min(Date.now() - P.t0, 20 * 60000); // активное время занятия
     const before = P.lesson.skill ? lvl(P.lesson.skill) : 0;
     S.log.push(...r); if (S.log.length > 3000) S.log = S.log.slice(-3000);
     MCACHE = new Map();
@@ -951,7 +966,7 @@
     if (P.mode === 'mini') { // «не хочу»: самое лёгкое сделано, день закрыт без упрёка
       const d = today(), dy = S.days[d] || (S.days[d] = { mode: modeFor(d), started: Date.now(), by: 'kira' });
       dy.refused = { reason: dy.refuseReason || null, choice: P.lesson.id.replace('mini-', '') };
-      dy.started = dy.started || Date.now(); dy.by = dy.by || 'kira';
+      dy.started = dy.started || Date.now(); dy.by = dy.by || 'kira'; dy.active = dy.active || 0;
       dy.steps = dy.steps || []; dy.energy = dy.energy || 'refused'; dy.end = dy.end || Date.now();
       save(); enqueueReport(d); P = null;
       if (location.hash === '#/today') route(); else location.hash = '#/today';
@@ -1065,6 +1080,7 @@
       <label class="row small" style="margin-top:12px"><input type="checkbox" data-act="reminded" ${(dy && dy.by === 'mom') || S.parent.remindOn === d ? 'checked' : ''}> Сегодня рабочее время началось после моего напоминания</label>
       <p class="muted small">По умолчанию: Пн-Пт школьный день, Сб отдыхаем, Вс полная учёба. 22.10 отдыхаем (день рождения).</p>
       ${dy && dy.missing && dy.missing.length ? `<p class="small">⚠️ Для этих предметов пока нет уроков, они пропущены: ${esc(dy.missing.join(', '))}.</p>` : ''}
+      <div class="row" style="margin-top:8px"><button class="btn soft small" data-act="resetday">↺ Начать сегодняшний день заново</button></div>
       <div class="row" style="margin-top:8px"><button class="btn small" data-act="sendreport">📤 Отправить отчёт за сегодня</button><button class="btn soft small" data-act="savereport">💾 Сохранить отчёт файлом</button></div>
       <p class="muted small">В очереди: ${S.outbox.length}. Последняя отправка: ${S.lastSend ? new Date(S.lastSend).toLocaleString('ru-RU') : 'ещё не было'}. ${C.config.reports ? '' : 'Почтовый ящик пока не подключён: отчёты копятся здесь и уйдут, когда подключим.'}</p></div>`;
 
@@ -1322,7 +1338,7 @@
     if (el.dataset.tab) { location.hash = '#/map/' + el.dataset.tab; return; }
     const d = today();
     if (el.dataset.act === 'startday') {
-      S.days[d] = Object.assign(S.days[d] || {}, { mode: modeFor(d), started: Date.now(), by: S.parent.remindOn === d ? 'mom' : 'kira' });
+      S.days[d] = Object.assign(S.days[d] || {}, { mode: modeFor(d), started: Date.now(), active: 0, lastAct: Date.now(), by: S.parent.remindOn === d ? 'mom' : 'kira' });
       save(); route(); return;
     }
     if (el.dataset.energy) {
@@ -1387,6 +1403,7 @@
       save(); app.innerHTML = viewParent(); return;
     }
     if (act === 'clearrange') { S.calendar = {}; save(); app.innerHTML = viewParent(); return; }
+    if (act === 'resetday') { if (confirm('Стереть сегодняшний план и время? Пройденные уроки останутся в прогрессе.')) { delete S.days[today()]; save(); route(); } return; }
     if (act === 'sendreport') { enqueueReport(today()); el.textContent = 'Поставлено в отправку ✓'; return; }
     if (act === 'savereport') {
       const url = URL.createObjectURL(new Blob([JSON.stringify(dayReport(today()), null, 1)], { type: 'application/json' }));
@@ -1426,6 +1443,9 @@
 
   // ---------- старт ----------
   S = load();
+  for (const dy of Object.values(S.days || {})) {
+    if (dy && dy.started && dy.active == null) { dy.active = 0; dy.lastAct = Date.now(); if (dy.timeUp) { delete dy.end; delete dy.timeUp; } }
+  }
   document.body.classList.toggle('syll', S.set.syll);
   unlock().then(loadContent).then((c) => { C = c; pickedWorlds = S.worlds.slice(); route(); flushOutbox(); checkTutor(); })
     .catch((e) => { app.innerHTML = `<div class="boot">Не получилось загрузить уроки. Проверь интернет и обнови страницу.<br><small>${esc(e.message)}</small></div>`; });
