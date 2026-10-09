@@ -359,7 +359,7 @@
   ['click', 'keydown', 'input', 'touchstart'].forEach((ev) => document.addEventListener(ev, touch, true));
 
   // ---------- адаптивный подбор: что Кире делать дальше и почему ----------
-  const weekFocus = () => (C.week && C.week.focus) || [];
+  const weekFocus = () => (S.parent.focus && S.parent.focus.length ? S.parent.focus : (C.week && C.week.focus) || []);
   const recent = (days) => { const since = addDays(-days); return S.log.filter((x) => !x.info && dstr(new Date(x.t)) >= since); };
   function continueSkill(s, used, why) {
     const tid = s.track, m = mastery(s.id);
@@ -377,7 +377,9 @@
     const ss = C.skills.filter((s) => s.track === tid && skillOpen(s)).sort((a, b) => PRIO[a.priority] - PRIO[b.priority]);
     for (const s of ss.filter((x) => weekFocus().includes(x.id))) { const st = continueSkill(s, used, 'фокус недели'); if (st) return st; }
     for (const s of ss) { const m = mastery(s.id); if (m.n && m.lvl < 3) { const st = continueSkill(s, used); if (st) return st; } }
-    const l = C.lessons.find((x) => !x.repeat && skillOf(x).track === tid && lessonOpen(x) && !isDone(x) && !used.has(x.id));
+    const mastered = C.lessons.filter((x) => !x.repeat && !x.control && skillOf(x).track === tid && lessonOpen(x) && !isDone(x) && lvl(skillOf(x).id) >= 4);
+    if (mastered.length) logAdapt(`Пропущены уроки: ${[...new Set(mastered.map((x) => skillOf(x).title))].join('; ')}`, 'эти навыки уже освоены самостоятельно, идём дальше');
+    const l = C.lessons.find((x) => !x.repeat && !x.control && skillOf(x).track === tid && lessonOpen(x) && !isDone(x) && !used.has(x.id) && lvl(skillOf(x).id) < 4);
     if (l) { used.add(l.id); return { kind: 'lesson', lesson: l.id, title: l.title, track: tid, why: 'новая тема', done: false }; }
     const weak = ss.filter((s) => GEN[s.id] && !used.has('p:' + s.id)).sort((a, b) => lvl(a.id) - lvl(b.id))[0];
     if (weak) { used.add('p:' + weak.id); return { kind: 'practice', skill: weak.id, title: 'Тренировка: ' + weak.title, track: tid, why: 'всё пройдено, держим форму', done: false }; }
@@ -393,7 +395,7 @@
     const ctlList = C.lessons.filter((l) => l.control);
     const lastCtl = Math.max(0, ...ctlList.map((l) => S.lessons[l.id] && S.lessons[l.id].at ? +new Date(S.lessons[l.id].at) : 0));
     const daysUsed = Object.values(S.days).filter((x) => x.started && x.steps && x.steps.length).length;
-    if (ctlList.length && daysUsed >= 3 && mode !== 'weekend' && (!lastCtl || Date.now() - lastCtl > 13 * 864e5) && energy === 'ok') {
+    if (ctlList.length && daysUsed >= 3 && mode !== 'weekend' && (!lastCtl || Date.now() - lastCtl > 13 * 864e5) && energy === 'ok' && loadFactor().delta >= 0) {
       const nxtC = ctlList.slice().sort((a, b) => ((S.lessons[a.id] || {}).times || 0) - ((S.lessons[b.id] || {}).times || 0))[0];
       used.add(nxtC.id); steps.push({ kind: 'lesson', lesson: nxtC.id, title: nxtC.title, track: 'reading', why: 'раз в две недели: сравниваем с прошлым разом, как растёт понимание', done: false });
     }
@@ -419,6 +421,11 @@
     const fav = Object.entries(ext).find(([, n]) => n >= 2);
     if (fav && mode === 'full') { const st = stepFor(fav[0], used); if (st) { st.why = 'ей интересно: сама выбирала это сверху'; steps.push(st); } }
     while (steps.length && steps[steps.length - 1].kind === 'break') steps.pop();
+    // нагрузка по последним дням: легко → +1 шаг, трудно → -1 шаг
+    const lf = loadFactor(), real = () => steps.filter((x) => x.kind !== 'break');
+    if (lf.delta < 0 && real().length > 2) { const last = real().pop(); steps.splice(steps.lastIndexOf(last), 1); while (steps.length && steps[steps.length - 1].kind === 'break') steps.pop(); logAdapt('Нагрузка снижена на 1 шаг', lf.why); notes.push('нагрузка снижена'); }
+    if (lf.delta > 0 && mode !== 'full' && energy === 'ok') { const add = stepFor(pref[0], used) || stepFor('logic', used); if (add) { add.why = 'добавлен 1 шаг: ' + lf.why; steps.push(add); logAdapt('Нагрузка увеличена на 1 шаг', lf.why); } }
+    steps.filter((x) => x.why && /трудно|часто|база|интересно|условие|фокус|добавлен|две недели/.test(x.why)).forEach((x) => logAdapt(`${x.title}`, x.why));
     if (energy === 'meh' || tiredDays >= 2) { notes.push(energy === 'meh' ? 'так себе: без лишнего' : 'устала два дня подряд: объём меньше'); return { steps: steps.filter((x) => x.kind !== 'break').slice(0, 2), missing, notes }; }
     return { steps, missing, notes };
   }
@@ -455,7 +462,7 @@
     return { v: 1, kind: 'daily', date: d, sent: new Date().toISOString(), mode: dy.mode || modeFor(d), started_by: dy.by || null, energy: dy.energy || null,
       minutes: mins, time_up: !!dy.timeUp, steps: (dy.steps || []).map((x) => ({ title: x.title, track: x.track, done: !!x.done, why: x.why || '' })), missing: dy.missing || [], notes: dy.notes || [],
       mastery: C.skills.filter((s) => mastery(s.id).n).map((s) => { const m = mastery(s.id); return { id: s.id, title: s.title, track: s.track, priority: s.priority, n: m.n, acc: m.acc, indep: m.indep, diff: m.diff, stab: m.stab, lvl: lvl(s.id), verdict: masteryVerdict(s.id) }; }),
-      self: selfStats(), focus: weekFocus(), read: readSpeed(d, d), control: controlRuns().filter((c) => c.date === d),
+      self: selfStats(), focus: weekFocus(), adapt: (S.adapt || []).filter((x) => x.d === d), read: readSpeed(d, d), control: controlRuns().filter((c) => c.date === d),
       tutor: (S.tutor || []).filter((x) => dstr(new Date(x.t)) === d),
       extra: dy.extraLesson ? { lesson: dy.extraLesson, done: !!dy.extraDone } : null, refused: dy.refused || null,
       lessons: Object.values(byLesson), errors_legend: C.errors, words_in_work: Object.keys(S.words).length };
@@ -551,7 +558,7 @@
       for (const [tid, e, t] of [['create', '🎨', 'Создать'], ['book', '📚', 'Моя книга'], ['english', '🎧', 'English'], ['logic', '🧩', 'Загадка'], ['story', '👂', 'Послушать историю']]) {
         h += `<button class="tile" style="background:${track(tid === 'book' || tid === 'story' ? 'reading' : tid).color}" data-tile="${tid}"><span class="e">${e}</span>${t}</button>`;
       }
-      return shell('today', h + '</div>');
+      return shell('today', h + '</div>' + (momLinks() ? `<h2>От мамы</h2><div class="cards">${momLinks()}</div>` : ''));
     }
 
     // ещё не начали
@@ -579,7 +586,7 @@
           ${[['reading', '📖', 'История'], ['math', '🔢', 'Числа'], ['english', '🎧', 'English'], ['logic', '🧩', 'Загадка'], ['create', '🎨', 'Создать']].map(([tid, e, t]) => `<button class="tile" style="background:${track(tid).color}" data-extra="${tid}"><span class="e">${e}</span>${t}</button>`).join('')}</div>` : '';
       const text = dy.refused ? 'Сегодня был лёгкий день. Это тоже нормально. Завтра продолжим.' : dy.timeUp ? 'Время вышло. На сегодня достаточно, остальное доделаем завтра.' : `На сегодня всё. Ты сделала шагов: ${done}. Отлично поработали.`;
       return shell('today', `${chip}<div class="done-screen"><div class="duo" style="justify-content:center">${Chars.html('nika', 'proud', 'jump')}${Chars.html('luna', 'happy', 'md jump')}</div>
-        <h1>На сегодня всё</h1><p class="sub" style="font-size:22px">${esc(text)}</p></div>${extraBtns}`);
+        <h1>На сегодня всё</h1><p class="sub" style="font-size:22px">${esc(text)}</p></div>${extraBtns}${momLinks() ? `<h2>От мамы</h2><div class="cards">${momLinks()}</div>` : ''}`);
     }
 
     // план дня
@@ -942,6 +949,8 @@
         for (const st of l.steps) if (st.type === 'words') for (const w of st.ids) if (!S.words[w]) S.words[w] = { box: 1, due: addDays(1) };
       }
       const after = lvl(id);
+      if (after >= 3 && before < 3) { const m = mastery(id); if (m.n <= 8) logAdapt(`«${C.skillById[id].title}» освоена быстрее плана`, `верно ${pct(m.acc)} за ${m.n} заданий, без подсказок ${pct(m.indep)}`); }
+      if (after >= 1 && after < 2 && mastery(id).enough && mastery(id).acc < 0.5) logAdapt(`По «${C.skillById[id].title}» добавлена практика полегче`, `верно только ${pct(mastery(id).acc)} заданий`);
       if (after >= 3 && !s.box) { s.box = 1; s.due = addDays(BOX_DAYS[1]); } // получается: ставим в повторение
       lines = `<div class="lvchange">${esc(C.skillById[id].title)}: <span class="big">${LV[Math.max(1, before)]}</span> ➜ <span class="big">${LV[Math.max(1, after)]}</span></div>
         <p class="sub">${esc(LVT[Math.max(1, after)])}${s.box ? ` · вспомним ${fmtDay(s.due)}` : ''}</p>`;
@@ -1045,7 +1054,118 @@
   }
 
   // ---------- родительский режим ----------
-  let pinBuf = '', parentOk = false;
+  // ---------- журнал адаптации: что система изменила и почему (виден маме) ----------
+  function logAdapt(text, why) {
+    S.adapt = S.adapt || []; const d = today();
+    if (S.adapt.some((x) => x.d === d && x.text === text)) return;
+    S.adapt.push({ d, text, why }); if (S.adapt.length > 120) S.adapt = S.adapt.slice(-120); save();
+  }
+  // нагрузка: подстраивается под последние 5 занятых дней
+  function loadFactor() {
+    const ds = Object.entries(S.days).filter(([d, x]) => d < today() && x.started).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 5).map(([, x]) => x);
+    if (ds.length < 3) return { delta: 0 };
+    const refused = ds.filter((x) => x.refused).length, timeUps = ds.filter((x) => x.timeUp).length, tired = ds.filter((x) => x.energy === 'tired').length;
+    const quick = ds.filter((x) => x.end && !x.timeUp && !x.refused && x.steps && x.steps.length && x.steps.every((st) => st.done) && activeMin(x) <= 0.7 * (C.modes.modes[x.mode] || { minutes: 15 }).minutes).length;
+    const hard = refused + timeUps + tired;
+    if (hard >= 2) return { delta: -1, why: `в последние дни трудно: «время вышло» ${timeUps}, отказы ${refused}, усталость ${tired}` };
+    if (quick >= 3 && refused === 0) return { delta: 1, why: `за последние дни Кира легко и быстро закончила ${quick} раз(а)` };
+    return { delta: 0 };
+  }
+  // фокус недели: сначала ваш ручной, потом из недельного разбора
+  const focusManual = () => (S.parent.focus && S.parent.focus.length ? S.parent.focus : null);
+  // предложение фокуса по данным (то же правило, что в недельном разборе)
+  function suggestFocus() {
+    const red = C.skills.filter((s) => s.priority === 'red' && s.track !== 'homework');
+    const hard = red.filter((s) => { const m = mastery(s.id); return m.n >= 4 && m.acc < 0.8; }); // трудные берём даже если навык «закрыт»: Кира его уже начала
+    const open = red.filter((s) => skillOpen(s) && !hard.includes(s));
+    const going = open.filter((s) => mastery(s.id).n && mastery(s.id).lvl < 3);
+    const fresh = open.filter((s) => !mastery(s.id).n);
+    return [...hard.map((s) => ({ id: s.id, why: `трудно: умение ${pct(mastery(s.id).acc)} в последних заданиях` })),
+      ...going.map((s) => ({ id: s.id, why: mastery(s.id).enough ? `начато, умение ${pct(mastery(s.id).acc)}, нужна практика посложнее` : 'начато, данных пока мало' })),
+      ...fresh.map((s) => ({ id: s.id, why: 'обязательный навык, ещё не начинали' }))].slice(0, 3);
+  }
+  // что нужно от мамы: только по фактам, с причиной
+  function momFlags() {
+    const out = [], since7 = addDays(-6);
+    const atts = S.log.filter((x) => !x.info && dstr(new Date(x.t)) >= since7);
+    for (const s of C.skills) {
+      const xs = atts.filter((x) => x.skill === s.id), cnt = {}; xs.flatMap((x) => x.errs || []).forEach((e) => (cnt[e] = (cnt[e] || 0) + 1));
+      const top = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0];
+      if (top && top[1] >= 3) out.push({ text: `5 минут вместе: «${s.title}»`, why: `за неделю одна и та же ошибка «${C.errors[top[0]] || top[0]}» ${top[1]} раза` });
+    }
+    const ref = Object.entries(S.days).filter(([d, x]) => d >= since7 && x.refused).length;
+    if (ref >= 2) out.push({ text: 'Спокойно поговорите, что мешает', why: `за неделю ${ref} раза Кира выбирала «не хочу»` });
+    const rh = atts.filter((x) => (x.help || []).includes('reading')).length;
+    if (atts.length >= 8 && rh / atts.length > 0.3) out.push({ text: '5 минут чтения вслух вместе', why: `в ${rh} из ${atts.length} заданий Кира просила прочитать за неё` });
+    const sk = atts.filter((x) => x.skipped).length;
+    if (sk >= 2) out.push({ text: 'Разберите вместе пропущенные задачи', why: `за неделю ${sk} задачи Кира пропустила после всех подсказок` });
+    const schoolDays = [1, 2, 3].map((k) => addDays(-k)).filter((d) => { const m = modeFor(d); return m === 'school' || m === 'full'; });
+    const missed = schoolDays.filter((d) => !(S.days[d] && S.days[d].started)).length;
+    if (schoolDays.length >= 2 && missed >= 2 && Object.keys(S.days).length) out.push({ text: 'Кира несколько дней не открывала рабочее время', why: `${missed} из последних ${schoolDays.length} школьных дней без занятий` });
+    return out;
+  }
+  // не отстаём ли от плана месяца: честно, с оговоркой про малое число данных
+  function monthStatus() {
+    const R = C.roadmap, now = new Date();
+    const m = R.months.find((x) => { const t = x.period.toLowerCase(); return (now.getMonth() === 9 && t.includes('октябр')) || (now.getMonth() === 10 && t.includes('ноябр')) || (now.getMonth() === 11 && t.includes('декабр')); }) || R.months[0];
+    const done = m.skills.filter((id) => lvl(id) >= m.target).length;
+    const started = m.skills.filter((id) => mastery(id).n).length;
+    const frac = Math.min(1, now.getDate() / new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate());
+    const expected = Math.round(frac * m.skills.length);
+    const data = Object.keys(S.days).length >= 4;
+    const state = !data ? 'мало данных (занятий меньше 4)' : done >= expected ? 'идёт по плану или лучше' : started >= expected ? 'начато достаточно, осваивается' : 'немного отстаёт';
+    return { m, done, started, expected, state, data };
+  }
+  function momSummary() {
+    const d = today(), dy = S.days[d], mode = modeFor(d), M = modeInfo(mode), ms = monthStatus(), ss = selfStats(), L = [];
+    L.push(['📍 Где Кира', dy && dy.started ? `${M.emoji} ${M.title}. Сегодня активно ${activeMin(dy)} мин из ${M.minutes}, шагов выполнено ${(dy.steps || []).filter((x) => x.done && x.kind !== 'break').length} из ${(dy.steps || []).filter((x) => x.kind !== 'break').length}.` : `${M.emoji} ${M.title}. Рабочее время сегодня ещё не начато.`]);
+    const good = C.skills.filter((s) => lvl(s.id) >= 3 && mastery(s.id).enough);
+    L.push(['✔ Освоено', good.length ? good.slice(0, 5).map((s) => `${LV[lvl(s.id)]} ${s.title}`).join(', ') + (good.length > 5 ? ` и ещё ${good.length - 5}` : '') + `. Основание: умение не ниже 80% на нужной сложности.` : 'Пока ничего не закрыто на уровне «получается»: данных мало.']);
+    const hard = C.skills.filter((s) => { const m = mastery(s.id); return m.n >= 4 && m.acc < 0.8; });
+    L.push(['⚠ Трудно', hard.length ? hard.slice(0, 4).map((s) => `${s.title} (умение ${pct(mastery(s.id).acc)}, сама ${pct(mastery(s.id).indep)})`).join('; ') : 'Явных трудностей нет, либо данных пока недостаточно (нужно хотя бы 4 задания по навыку).']);
+    const steps = dy && dy.steps ? dy.steps.filter((x) => x.kind !== 'break') : [];
+    L.push(['📅 Сегодня', steps.length ? steps.map((x) => `${x.done ? '✅' : '·'} ${x.title}${x.why && x.why !== 'новая тема' ? ` (${x.why})` : ''}`).join('; ') : mode === 'off' || mode === 'weekend' ? 'Ничего обязательного.' : 'План появится, когда Кира начнёт рабочее время.']);
+    const fm = focusManual() || ((C.week && C.week.focus) || []);
+    L.push(['🎯 На этой неделе', fm.length ? 'Фокус: ' + fm.map((id) => (C.skillById[id] || { title: id }).title).join('; ') + (focusManual() ? ' (выбран вами)' : ' (из недельного разбора)') : 'Фокус не выбран: система идёт по программе. Можно выбрать на вкладке «Неделя».']);
+    L.push(['🗓 Не отстаём ли', `${ms.m.title}: на уровне «получается» ${ms.done} из ${ms.m.skills.length}, начато ${ms.started}, к этой дате ожидается около ${ms.expected}. Вывод: ${ms.state}.`]);
+    const fast = C.skills.filter((s) => lvl(s.id) >= 4 && mastery(s.id).indep >= 0.7);
+    L.push(['⏩ Где ускориться', fast.length ? fast.slice(0, 3).map((s) => s.title).join(', ') + ': освоено, дальше идём вперёд.' : 'Пока нет навыков, которые уверенно освоены сама.']);
+    const lf = loadFactor();
+    L.push(['✋ Где остановиться', lf.delta < 0 ? 'Нагрузка снижена: ' + lf.why + '.' : hard.length ? 'Новое по трудным темам не добавляем, пока не получится: ' + hard.slice(0, 2).map((s) => s.title).join(', ') + '.' : 'Пока всё в порядке.']);
+    L.push(['🧒 Самостоятельность (14 дней)', ss.days ? `начала сама ${ss.started_self} из ${ss.days}, довела до конца ${ss.finished}, «не хочу» ${ss.refused}.` : 'Данных пока нет.']);
+    const fl = momFlags();
+    return { L, fl };
+  }
+  function viewParentSummary() {
+    const { L, fl } = momSummary();
+    let h = `<h2>За 1 минуту</h2><div class="card">${L.map(([a, b]) => `<div style="margin:8px 0"><b>${a}.</b> ${esc(b)}</div>`).join('')}</div>`;
+    h += `<h2>${fl.length ? '🙋 Нужна ваша помощь' : '🙋 От мамы'}</h2><div class="card">${fl.length ? fl.map((f) => `<div style="margin:10px 0"><b>${esc(f.text)}</b><div class="muted small">Почему: ${esc(f.why)}</div></div>`).join('') : 'От мамы ничего не требуется.'}</div>`;
+    return h;
+  }
+  function viewParentWeek() {
+    let h = `<h2>Фокус недели</h2><div class="card"><p class="small">Что система даёт Кире в первую очередь. Выберите до 3 навыков или нажмите «Предложить» (по данным: сначала то, что трудно, потом начатое, потом обязательное). Выбранное вами важнее недельного разбора.</p>`;
+    const cur = focusManual() || [];
+    h += `<div class="row">${C.skills.filter((s) => s.track !== 'homework' && s.priority !== 'green' && (skillOpen(s) || mastery(s.id).n)).map((s) => `<label class="tag ${cur.includes(s.id) ? 'green' : ''}" style="cursor:pointer;padding:6px 12px"><input type="checkbox" data-focus="${s.id}" ${cur.includes(s.id) ? 'checked' : ''}> ${esc(s.title)}</label>`).join('')}</div>
+      <div class="row" style="margin-top:10px"><button class="btn small" data-act="suggestfocus">🎯 Предложить по данным</button><button class="btn soft small" data-act="clearfocus">Сбросить мой выбор</button></div>
+      <p class="small">${cur.length ? 'Сейчас: ' + cur.map((id) => esc(C.skillById[id].title)).join('; ') : (C.week.focus && C.week.focus.length ? 'Сейчас из недельного разбора: ' + C.week.focus.map((id) => esc((C.skillById[id] || { title: id }).title)).join('; ') : 'Сейчас фокус не выбран.')}</p>
+      ${S.parent.focusWhy ? `<div class="muted small">Почему: ${Object.entries(S.parent.focusWhy).map(([id, w]) => esc((C.skillById[id] || { title: id }).title) + ': ' + esc(w)).join('; ')}</div>` : ''}</div>`;
+    const lf = loadFactor();
+    h += `<h2>Нагрузка</h2><div class="card"><p>${lf.delta < 0 ? '⬇ Система снижает нагрузку на 1 шаг: ' + esc(lf.why) + '.' : lf.delta > 0 ? '⬆ Система добавляет 1 шаг: ' + esc(lf.why) + '.' : 'Нагрузка обычная. Менять не нужно.'}</p>
+      <p class="muted small">Считается по последним занятым дням: если Кира несколько раз легко закончила, добавляется шаг; если было «время вышло», отказы или усталость, шаг убирается.</p></div>`;
+    h += `<h2>Что система изменила и почему</h2><div class="card">${(S.adapt || []).length ? (S.adapt || []).slice(-15).reverse().map((x) => `<div style="margin:8px 0"><span class="tag">${x.d.slice(8)}.${x.d.slice(5, 7)}</span> <b>${esc(x.text)}</b><div class="muted small">Почему: ${esc(x.why)}</div></div>`).join('') : '<p class="small">Пока изменений не было. Они появятся, когда накопятся данные: если тема закроется раньше срока, добавится практика, снизится нагрузка и так далее.</p>'}</div>`;
+    return h;
+  }
+
+  const momLinks = () => (S.parent.links || []).map((l) => `<a class="task-card" href="${esc(l.url)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><div class="pic" style="background:var(--sky-l)">🔗</div><div><span class="tag">От мамы</span><div class="t">${esc(l.title)}</div><div class="m">${esc(l.note || '')}</div></div><div class="go">➜</div></a>`).join('');
+  function parentTools() {
+    const links = S.parent.links || [];
+    return `<h2>Ссылка или задание для Киры</h2><div class="card"><p class="small">Видео, мастер-класс, упражнение на другом сайте. Появится у Киры в выходной и в конце учебного дня как «От мамы». Отметка «сделала» у внешних ресурсов системой не проверяется.</p>
+      <div class="row"><input class="field" id="lktitle" style="flex:1;min-width:180px" placeholder="Название"><input class="field" id="lkurl" style="flex:2;min-width:240px" placeholder="Ссылка (https://…)"></div>
+      <div class="row" style="margin-top:8px"><input class="field" id="lknote" style="flex:1" placeholder="Подпись для Киры (необязательно)"><button class="btn small" data-act="addlink">Добавить</button></div>
+      ${links.length ? links.map((l, i) => `<div class="row small" style="margin-top:8px"><b>${esc(l.title)}</b><a href="${esc(l.url)}" target="_blank" rel="noopener">${esc(l.url.slice(0, 50))}</a><button class="btn soft small" data-dellink="${i}">Убрать</button></div>`).join('') : ''}</div>
+      <h2>Домашка</h2><div class="card"><p class="small">Кира фотографирует задание на вкладке «Домашка». Фото приходит вам в Telegram, вы передаёте его Claude, разбор появляется у Киры на том же сайте. Отправка фото работает после подключения ящика отчётов (${C.config.reports ? 'подключён' : 'ещё не подключён'}).</p></div>`;
+  }
+  let pinBuf = '', parentOk = false, ptab = 'now';
   function viewParent() {
     if (!parentOk) {
       const creating = !S.parent.pin;
@@ -1059,17 +1179,14 @@
     const sess = S.sessions.filter((s) => s.d >= week);
     const mins = Math.round(sess.reduce((a, s) => a + s.ms, 0) / 60000);
     const errName = (c) => (C.errors[c] || c);
-    let h = `<h1>Кабинет мамы</h1><p class="sub">${esc(S.name)} · миры: ${S.worlds.map((w) => (C.worlds.find((x) => x.id === w) || {}).title).filter(Boolean).join(', ') || 'не выбраны'}</p>
-      <div class="cards"><div class="card"><div class="tag">7 дней</div><div style="font-size:34px;font-weight:900">Занятий: ${sess.length} · минут: ${mins}</div>
-      <div class="muted small">Уроков пройдено всего: ${Object.values(S.lessons).filter((x) => x.done).length} из ${C.lessons.length}</div></div>
-      <div class="card"><div class="tag">Повторение</div><div style="font-size:34px;font-weight:900">К повтору: ${dueSkills().length + dueWords().length}</div>
-      <div class="muted small">Слов в работе: ${Object.keys(S.words).length}</div></div></div>`;
-
-    h += `<div class="row" style="margin:8px 0 0"><button class="btn" data-go="#/path">🗺 Путь Киры</button></div>`;
+    const sec = { now: '', week: '', skills: '', tools: '', set: '' }; let cur = 'now', h = '';
+    const flush = () => { sec[cur] += h; h = ''; };
+    flush(); cur = 'set';
     const tset = tutorSet();
     h += `<h2>AI-учитель на этом компьютере</h2><div class="card"><p class="small">Работает через Ollama на этом же ноутбуке, без интернета и без оплаты. Включается, когда Кира выбирает «Мне трудно» → «Не знаю, как решить».</p>
       <div class="row"><input class="field" id="turl" style="width:280px" value="${esc(tset.url)}"><input class="field" id="tmodel" style="width:180px" value="${esc(tset.model)}">
       <button class="btn small" data-act="tutsave">Сохранить и проверить</button></div><p class="small" id="tstat">${tutorReady ? '✅ Учитель на связи' : '○ Учитель не найден: подсказки работают как обычно'}</p></div>`;
+    flush(); cur = 'now';
     // режимы и отчёты
     const d = today(), dy = S.days[d];
     const mopts = (sel) => Object.entries(C.modes.modes).map(([k, m]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${m.emoji} ${m.title}</option>`).join('');
@@ -1084,11 +1201,13 @@
       <div class="row" style="margin-top:8px"><button class="btn small" data-act="sendreport">📤 Отправить отчёт за сегодня</button><button class="btn soft small" data-act="savereport">💾 Сохранить отчёт файлом</button></div>
       <p class="muted small">В очереди: ${S.outbox.length}. Последняя отправка: ${S.lastSend ? new Date(S.lastSend).toLocaleString('ru-RU') : 'ещё не было'}. ${C.config.reports ? '' : 'Почтовый ящик пока не подключён: отчёты копятся здесь и уйдут, когда подключим.'}</p></div>`;
 
+    flush(); cur = 'set';
     // программа: Россия или международная
     h += `<h2>Программа</h2><div class="card"><div class="row"><b>Сейчас учимся по:</b>
       <select data-program><option value="ru" ${!intl() ? 'selected' : ''}>Российская программа (школьные дни + выходные)</option><option value="intl" ${intl() ? 'selected' : ''}>Международная (после переезда: полная учёба в будни, английский вдвое больше)</option></select></div>
       <p class="muted small">Переключение меняет расписание недели и порядок предметов. Навыки Киры и её прогресс сохраняются.</p></div>`;
 
+    flush(); cur = 'skills';
     // покрытие карт программ
     h += '<h2>Покрытие программ</h2><div class="cards">';
     for (const cur of C.curricula) {
@@ -1101,6 +1220,7 @@
     }
     h += '</div>';
 
+    flush(); cur = 'skills';
     // чтение: скорость и контрольные истории
     const rs1 = readSpeed(addDays(-6), today()), rs2 = readSpeed(addDays(-13), addDays(-7)), runs = controlRuns();
     h += `<h2>Чтение: динамика</h2><div class="card"><div class="row"><div><div class="tag">За 7 дней</div><div style="font-size:34px;font-weight:900">${rs1.wpm == null ? 'мало данных' : '≈' + rs1.wpm + ' слов/мин'}</div></div>
@@ -1108,6 +1228,7 @@
       <p class="muted small">Скорость считается по времени до первого ответа на задании с текстом (читала сама, без озвучки), поэтому это ориентир, а не замер. Цель по программе: не меньше 40 слов в минуту к концу 2 класса, но главное, чтобы внимание освобождалось для понимания. Нужно хотя бы 3 задания с текстом.</p>
       ${runs.length ? `<table class="ptable"><tr><th>Контрольная история</th><th>Дата</th><th>Верно</th><th>Сама</th><th>Помощь</th><th>Слов/мин</th></tr>${runs.map((r) => `<tr><td>${esc((C.lessons.find((l) => l.id === r.lesson) || {}).title || r.lesson)}</td><td>${r.date}</td><td>${r.ok} из ${r.n}</td><td>${r.indep}</td><td>${r.help}</td><td>${r.wpm || '—'}</td></tr>`).join('')}</table>` : '<p class="small">Контрольная история появится в плане дня примерно через 3 дня занятий, потом раз в две недели.</p>'}</div>`;
 
+    flush(); cur = 'week';
     // самостоятельность: главная цель первых трёх месяцев
     const ss = selfStats();
     h += `<h2>Самостоятельность (14 дней)</h2><div class="cards">
@@ -1116,6 +1237,7 @@
       <div class="card"><div class="tag yellow">Просила помощь</div><div style="font-size:34px;font-weight:900">${ss.help_asked}</div><div class="muted small">раз через «Мне трудно» (это хорошо: не отказ)</div></div>
       <div class="card"><div class="tag">Отказы · сверху</div><div style="font-size:34px;font-weight:900">${ss.refused} · ${ss.extra}</div><div class="muted small">«не хочу» и «ещё одна» по желанию</div></div></div>`;
 
+    flush(); cur = 'skills';
     // освоение навыков: 4 измерения и вывод
     h += `<h2>Навыки: где Кира сейчас</h2><div class="card"><table class="ptable"><tr><th>Навык</th><th>Попыток</th><th>Умение</th><th>Сама</th><th>Сложность</th><th>Повторения</th><th>Вывод</th><th>Частые ошибки</th></tr>`;
     for (const sk2 of C.skills) {
@@ -1126,6 +1248,7 @@
     }
     h += `</table><p class="muted small">Умение: верные ответы в последних 6 заданиях. Сама: без подсказок, озвучки и ошибок. Сложность: самый трудный уровень, где получается 80%. Повторения: сколько раз чисто вспомнила через несколько дней. Меньше 4 попыток: выводов не делаем.</p></div>`;
 
+    flush(); cur = 'skills';
     // покрытие карты навыков
     h += '<h2>Карта навыков: что уже есть в программе</h2><div class="card">';
     for (const ar of C.catalog.areas) {
@@ -1134,6 +1257,7 @@
     }
     h += '<p class="muted small">✓ есть задания, ○ пока нет. Недостающее добавляет Claude пачками заданий.</p></div>';
 
+    flush(); cur = 'skills';
     // навыки
     h += `<h2>Навыки</h2><div class="card"><label class="row small"><input type="checkbox" data-act="unlock" ${S.parent.unlockAll ? 'checked' : ''}> Открыть все уроки без очереди</label>
       <table class="ptable"><tr><th>Навык</th><th>Уровень</th><th>Ручная отметка</th><th>Повтор</th><th>По программе</th></tr>`;
@@ -1145,18 +1269,29 @@
     }
     h += '</table></div>';
 
+    flush(); cur = 'tools';
     h += `<h2>Записка на главный экран</h2><div class="card"><textarea class="field" id="pcomment" placeholder="Её покажет Ника на главном экране">${esc(S.parent.comment)}</textarea>
       <div class="row" style="margin-top:10px"><button class="btn small" data-act="savecomment">Сохранить</button><button class="btn soft small" data-act="clearcomment">Убрать</button></div></div>
       <h2>Заметки для себя</h2><div class="card"><textarea class="field" id="pnotes">${esc(S.parent.notes)}</textarea>
       <div class="row" style="margin-top:10px"><button class="btn small" data-act="savenotes">Сохранить</button><button class="btn soft small" data-act="voice" data-target="pnotes">🎤 Надиктовать</button></div></div>
-      <h2>Данные</h2><div class="card"><div class="row">
+`;
+    flush(); cur = 'set';
+    h += `<h2>Данные</h2><div class="card"><div class="row">
       <button class="btn small" data-act="export">⬇️ Выгрузить прогресс</button>
       <label class="btn soft small">⬆️ Загрузить<input type="file" accept=".json" data-act="import" hidden></label>
       <button class="btn soft small" data-act="newpin">Сменить PIN</button>
       <button class="btn soft small" data-act="forgetkey">Забыть пароль школы на этом компьютере</button>
       <button class="btn soft small" data-act="reset">Сбросить всё</button></div>
       <p class="muted small">Прогресс хранится только в этом браузере. Выгрузку можно передать в Claude: он разберёт ошибки и добавит уроки.</p></div>`;
-    return shell('', h);
+    flush();
+    // добавки к вкладкам
+    sec.tools = parentTools() + sec.tools;
+    const tabs = [['now', '🙋 Сегодня'], ['week', '📅 Неделя'], ['skills', '🌳 Навыки и программы'], ['tools', '🧰 Для Киры'], ['set', '⚙️ Настройки']];
+    const top = `<div class="row" style="justify-content:space-between"><h1>Кабинет мамы</h1><button class="btn soft small" data-go="#/path">🗺 Путь Киры</button></div>
+      <p class="sub">${esc(S.name)} · миры: ${S.worlds.map((w) => (C.worlds.find((x) => x.id === w) || {}).title).filter(Boolean).join(', ') || 'не выбраны'}</p>
+      <div class="tabs">${tabs.map(([k, t]) => `<button data-ptab="${k}" class="${ptab === k ? 'on' : ''}">${t}</button>`).join('')}</div>`;
+    const first = { now: viewParentSummary() + sec.now, week: viewParentWeek() + sec.week };
+    return shell('', top + (first[ptab] || sec[ptab]));
   }
 
   // ---------- путь Киры (для мамы): сейчас → месяц → 3 месяца → конец 2 класса → дальше ----------
@@ -1336,6 +1471,8 @@
     if (el.dataset.act === 'syll') { S.set.syll = !S.set.syll; save(); P ? renderPlayer() : route(); return; }
     if (P) { onPlayerClick(el); return; }
     if (el.dataset.tab) { location.hash = '#/map/' + el.dataset.tab; return; }
+    if (el.dataset.ptab) { ptab = el.dataset.ptab; app.innerHTML = viewParent(); window.scrollTo(0, 0); return; }
+    if (el.dataset.dellink != null) { S.parent.links.splice(+el.dataset.dellink, 1); save(); app.innerHTML = viewParent(); return; }
     const d = today();
     if (el.dataset.act === 'startday') {
       S.days[d] = Object.assign(S.days[d] || {}, { mode: modeFor(d), started: Date.now(), active: 0, lastAct: Date.now(), by: S.parent.remindOn === d ? 'mom' : 'kira' });
@@ -1390,6 +1527,13 @@
       const url = URL.createObjectURL(new Blob([JSON.stringify(S, null, 1)], { type: 'application/json' }));
       const a = document.createElement('a'); a.href = url; a.download = `nika-progress-${today()}.json`; a.click(); return;
     }
+    if (act === 'addlink') {
+      const t = document.getElementById('lktitle').value.trim(), u = document.getElementById('lkurl').value.trim(), n = document.getElementById('lknote').value.trim();
+      if (!t || !/^https?:\/\//.test(u)) { alert('Нужны название и ссылка, которая начинается с https://'); return; }
+      (S.parent.links = S.parent.links || []).push({ title: t, url: u, note: n }); save(); app.innerHTML = viewParent(); return;
+    }
+    if (act === 'suggestfocus') { const sg = suggestFocus(); S.parent.focus = sg.map((x) => x.id); S.parent.focusWhy = Object.fromEntries(sg.map((x) => [x.id, x.why])); save(); logAdapt('Предложен фокус недели: ' + sg.map((x) => C.skillById[x.id].title).join('; '), sg.map((x) => x.why).join('; ')); app.innerHTML = viewParent(); return; }
+    if (act === 'clearfocus') { S.parent.focus = []; S.parent.focusWhy = null; save(); app.innerHTML = viewParent(); return; }
     if (act === 'tutsave') {
       S.set.tutor = { url: document.getElementById('turl').value.trim().replace(/\/$/, ''), model: document.getElementById('tmodel').value.trim() }; save();
       const st = document.getElementById('tstat'); st.textContent = 'Проверяю…';
@@ -1417,6 +1561,11 @@
     const el = e.target;
     if (el.dataset.manual) { const s = sk(el.dataset.manual); s.manual = el.value === '' ? undefined : +el.value; save(); app.innerHTML = viewParent(); return; }
     if (el.dataset.act === 'unlock') { S.parent.unlockAll = el.checked; save(); return; }
+    if (el.dataset.focus) {
+      const f = new Set(S.parent.focus || []); el.checked ? f.add(el.dataset.focus) : f.delete(el.dataset.focus);
+      if (f.size > 3) { alert('В фокус можно взять до 3 навыков: так Кире проще.'); el.checked = false; f.delete(el.dataset.focus); }
+      S.parent.focus = [...f]; S.parent.focusWhy = null; save(); app.innerHTML = viewParent(); return;
+    }
     if (el.dataset.program != null) { S.set.program = el.value; save(); route(); return; }
     if (el.dataset.daymode) { const d = el.dataset.daymode; S.calendar[d] = el.value; const dy = S.days[d]; if (dy && !dy.started) dy.mode = el.value; save(); app.innerHTML = viewParent(); return; }
     if (el.dataset.act === 'reminded') { const d = today(); S.parent.remindOn = el.checked ? d : ''; if (S.days[d]) S.days[d].by = el.checked ? 'mom' : 'kira'; save(); return; }
