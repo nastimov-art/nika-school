@@ -1,6 +1,6 @@
 // Офлайн: оболочка из кэша сразу (обновляется в фоне), уроки из сети с запасным кэшем.
 // ponytail: при изменении app.js/styles.css поднимай VERSION, иначе Кира увидит новое только со второго открытия.
-const VERSION = 'nika-v9';
+const VERSION = 'nika-v10';
 const CORE = ['./', 'index.html', 'styles.css', 'app.js', 'chars.js', 'manifest.webmanifest',
   'assets/fonts/fonts.css', 'assets/fonts/nunito-cyrillic.woff2', 'assets/fonts/nunito-latin.woff2', 'assets/icon-192.png'];
 

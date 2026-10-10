@@ -236,6 +236,15 @@
     const H = C.worldsData.heroes; const ids = (S.worlds || []).filter((w) => H[w]);
     return Math.random() < 0.6 && ids.length ? H[pick(ids)] : H.default; // миры не больше чем в половине с небольшим
   }
+  const clockSvg = (h, m) => {
+    const cx = 100, p = ['<svg viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="часы"><circle cx="100" cy="100" r="92" fill="#fff" stroke="#2B2350" stroke-width="6"/>'];
+    for (let i = 0; i < 12; i++) { const a = i * Math.PI / 6, n = i || 12;
+      p.push(`<line x1="${(cx + 80 * Math.sin(a)).toFixed(1)}" y1="${(cx - 80 * Math.cos(a)).toFixed(1)}" x2="${(cx + 90 * Math.sin(a)).toFixed(1)}" y2="${(cx - 90 * Math.cos(a)).toFixed(1)}" stroke="#2B2350" stroke-width="3"/>`);
+      p.push(`<text x="${(cx + 68 * Math.sin(a)).toFixed(1)}" y="${(cx - 68 * Math.cos(a) + 6).toFixed(1)}" font-size="18" font-weight="800" text-anchor="middle" fill="#2B2350">${n}</text>`); }
+    const ah = ((h % 12) * 30 + m * 0.5) * Math.PI / 180, am = m * 6 * Math.PI / 180;
+    p.push(`<line x1="100" y1="100" x2="${(cx + 44 * Math.sin(ah)).toFixed(1)}" y2="${(cx - 44 * Math.cos(ah)).toFixed(1)}" stroke="#7C5CFF" stroke-width="9" stroke-linecap="round"/><line x1="100" y1="100" x2="${(cx + 68 * Math.sin(am)).toFixed(1)}" y2="${(cx - 68 * Math.cos(am)).toFixed(1)}" stroke="#FF6B5B" stroke-width="5" stroke-linecap="round"/><circle cx="100" cy="100" r="6" fill="#2B2350"/></svg>`);
+    return p.join('');
+  };
   const GEN = {
     'm.compose10': (d) => {
       const n = d >= 2 ? rint(6, 9) : 10, a = rint(1, n - 1);
@@ -279,6 +288,35 @@
       const W = C.readwords.words.filter(([w]) => d === 1 ? w.length <= 5 : w.length >= 5);
       const [w, p] = pick(W); const n = (w.match(/[аеёиоуыэюя]/gi) || []).length;
       return { type: 'choice', q: `Сколько слогов в слове «${w}»? Хлопни ладошами.`, pic: p, options: shuffle([n - 1, n, n + 1].filter((x) => x >= 1).map((x) => x === n ? { t: String(x), ok: true } : { t: String(x), err: 'off_by_one' })), hints: ['Слогов столько, сколько гласных звуков.', 'Хлопай на каждый гласный: а, о, у, ы, э, я, ё, ю, е, и.'] };
+    },
+    'm.table': (d) => {
+      const f = d === 1 ? [2, 5] : d === 2 ? [3, 5, 2] : [3, 4, 5, 2], a = pick(f), b = rint(2, a === 5 ? 10 : 9), ans = a * b;
+      return { type: 'input', q: `${a} × ${b} = …`, answer: String(ans), errs: { [a + b]: 'mul_add', [ans - a]: 'off_by_group', [ans + a]: 'off_by_group' },
+        hints: [`${a} × ${b} это ${b} раз по ${a}.`, `Считай по ${a}: ${Array.from({ length: Math.min(b, 4) }, (_, i) => a * (i + 1)).join(', ')}…`] };
+    },
+    'm.div': (d) => {
+      const f = d === 1 ? [2, 5] : [2, 3, 4, 5], a = pick(f), q = rint(2, a === 5 ? 9 : 8), n = a * q;
+      return { type: 'input', q: `${n} : ${a} = …`, answer: String(q), errs: { [n * a]: 'div_mul', [n + a]: 'wrong_operation', [q + 1]: 'off_by_one', [q - 1]: 'off_by_one' },
+        hints: [`Какое число умножить на ${a}, чтобы получить ${n}?`, `${a} × ? = ${n}`] };
+    },
+    'm.time': (d) => {
+      const h = rint(1, 12), m = d === 1 ? 0 : d === 2 ? pick([0, 30]) : pick([0, 15, 30, 45]);
+      const fmt = (hh, mm) => `${hh}:${String(mm).padStart(2, '0')}`;
+      const swapH = Math.max(1, Math.round(m / 5) || 12), swapM = (h % 12) * 5;
+      const opts = [{ t: fmt(h, m), ok: true }, { t: fmt(swapH, swapM), err: 'clock_hands' }, { t: fmt(h % 12 + 1, m), err: 'off_by_one' }].filter((x, i, a2) => a2.findIndex((y) => y.t === x.t) === i);
+      return { type: 'choice', q: 'Который час?', svg: clockSvg(h, m), options: shuffle(opts), hints: ['Короткая стрелка показывает час, длинная минуты. Длинная на 12 значит ровно.'] };
+    },
+    'ru.vowel': (d) => {
+      const W = [['в_да', 'воды', 'о'], ['тр_ва', 'травы', 'а'], ['з_ма', 'зимы', 'и'], ['л_са', 'лисы', 'и'], ['г_ра', 'горы', 'о'], ['р_ка', 'реки', 'е'], ['н_га', 'ноги', 'о'], ['ст_на', 'стены', 'е'], ['р_ба', 'рыбы', 'ы'], ['с_ва', 'совы', 'о'], ['м_ря', 'моря', 'о']];
+      const [w, chk, ans] = pick(W); const bad = shuffle(['а', 'о', 'е', 'и', 'я', 'ы'].filter((x) => x !== ans)).slice(0, 2);
+      return { type: 'choice', q: `Какая буква в слове ${w}?`, text: `Проверочное слово: ${chk}`, options: shuffle([{ t: ans, ok: true }, ...bad.map((b) => ({ t: b, err: 'vowel_guess' }))]), hints: ['Измени слово, чтобы гласная стала ударной, и послушай её.'] };
+    },
+    'ru.cons': (d) => {
+      const W = [['ду_', 'дубы', 'б'], ['сне_', 'снега', 'г'], ['хле_', 'хлеба', 'б'], ['моро_', 'морозы', 'з'], ['гла_', 'глаза', 'з'], ['зу_', 'зубы', 'б'], ['дру_', 'друга', 'г'], ['лу_', 'луга', 'г'], ['пиро_', 'пироги', 'г'], ['ра_', 'раки', 'к'], ['гри_', 'грибы', 'б']];
+      const [w, chk, ans] = pick(W);
+      const pairs = { б: 'п', п: 'б', г: 'к', к: 'г', д: 'т', т: 'д', з: 'с', с: 'з', ж: 'ш', ш: 'ж', в: 'ф', ф: 'в' };
+      const bad = [pairs[ans] || 'к', 'л'].filter((x) => x !== ans);
+      return { type: 'choice', q: `Какая буква в слове ${w}?`, text: `Проверочное слово: ${chk}`, options: shuffle([{ t: ans, ok: true }, ...bad.map((b) => ({ t: b, err: 'cons_guess' }))]), hints: ['Измени слово так, чтобы согласная оказалась перед гласной.'] };
     },
     'rd.tech': (d) => {
       const W = C.readwords.words.filter(([w]) => (d === 1 ? w.length <= 4 : d === 2 ? w.length >= 4 && w.length <= 6 : w.length >= 6));
@@ -814,6 +852,7 @@
       if (t.q) body += `<p class="q">${rich(t.q, t.qLang)} ${ts.audioOn ? sayBtn(t.q, t.qLang || 'ru') : ''}</p>`;
       if (t.text) body += `<div class="reading" ${t.big ? 'style="font-size:56px;text-align:center;letter-spacing:.04em"' : ''}>${ts.audioOn ? sayBtn(t.text, lang, 'say') : ''}${rich(t.text, lang)}</div>`;
       if (t.img) body += `<img class="pic-img" src="${esc(src(t.img))}" alt="">`;
+      if (t.svg) body += `<div class="pic-svg">${t.svg}</div>`;
       if (t.pic) body += `<div class="pic-big">${esc(t.pic)}</div>`;
       if (t.audio) body += `<p>${sayBtn(t.audio, lang, 'big')} <span class="listen muted">Нажми и послушай</span></p>`;
     }
@@ -1107,7 +1146,7 @@
   // не отстаём ли от плана месяца: честно, с оговоркой про малое число данных
   function monthStatus() {
     const R = C.roadmap, now = new Date();
-    const m = R.months.find((x) => { const t = x.period.toLowerCase(); return (now.getMonth() === 9 && t.includes('октябр')) || (now.getMonth() === 10 && t.includes('ноябр')) || (now.getMonth() === 11 && t.includes('декабр')); }) || R.months[0];
+    const m = R.months.find((x) => x.month === now.getMonth()) || R.months[0];
     const done = m.skills.filter((id) => lvl(id) >= m.target).length;
     const started = m.skills.filter((id) => mastery(id).n).length;
     const frac = Math.min(1, now.getDate() / new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate());
@@ -1294,6 +1333,16 @@
     return shell('', top + (first[ptab] || sec[ptab]));
   }
 
+  // чего ещё нет в программе: пункты карты, для которых вообще нет ни урока, ни тренировки
+  const hasContent = (id) => lessonsOf(id).length > 0 || !!GEN[id] || ['self', 'help'].includes(id);
+  function contentGaps() {
+    const out = [];
+    for (const cur of C.curricula) for (const it of cur.items) {
+      const miss = !it.skills.length ? true : it.skills.every((id) => !hasContent(id));
+      if (miss) out.push({ map: cur.title, grade: it.grade, text: it.text });
+    }
+    return out;
+  }
   // ---------- путь Киры (для мамы): сейчас → месяц → 3 месяца → конец 2 класса → дальше ----------
   function viewPath() {
     if (!parentOk) { location.hash = '#/parent'; return ''; }
@@ -1312,7 +1361,10 @@
         <p class="small">Навыков на уровне 🌳 и выше: ${done} из ${m.skills.length}. Цель по самостоятельности: начинать сама в ${Math.round(m.self.started_self_share * 100)}% дней (сейчас ${Math.round(share * 100)}%).</p>
         <div>${m.skills.map((id) => C.skillById[id] ? `<span class="tag ${lvl(id) >= m.target ? 'green' : ''}">${lvl(id) ? LV[lvl(id)] : '○'} ${esc(C.skillById[id].title)}</span>` : '').join(' ')}</div></div>`;
     }
-    h += `<h2>${esc(R.grade2_end.title)}</h2><div class="card"><ul>${R.grade2_end.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
+    const gaps = contentGaps();
+    h += `<h2>Что ещё нужно добавить</h2><div class="card"><p>Пунктов программы, для которых пока нет уроков: <b>${gaps.length}</b> из ${C.curricula.reduce((a, c) => a + c.items.length, 0)}.</p>${gaps.length ? '<ul>' + gaps.map((g) => `<li class="small">${esc(g.grade)} · ${esc(g.text)} <span class="muted">(${esc(g.map)})</span></li>`).join('') + '</ul>' : '<p class="small">Всё есть, дальше расширяем и углубляем.</p>'}
+      <p class="muted small">Недостающее Claude добавляет пачками: вы говорите «добавь тему», он делает уроки, проверяет и публикует.</p></div>
+    <h2>${esc(R.grade2_end.title)}</h2><div class="card"><ul>${R.grade2_end.items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>
       <p class="muted small">Что из этого уже есть в программе, видно в кабинете: «Карта навыков».</p></div>`;
     h += `<h2>Дальше</h2><div class="cards">${R.later.map((x) => `<div class="card"><div class="tag">${esc(x.title)}</div><p>${esc(x.text)}</p></div>`).join('')}</div>`;
     return shell('', h);
