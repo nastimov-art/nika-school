@@ -300,3 +300,40 @@ textarea.field { min-height: 110px; resize: vertical; font-weight: 600; }
 
 .pic-svg { margin: 6px 0 16px; }
 .pic-svg svg { max-width: 100%; height: auto; display: block; }
+
+/* ---------- Тема «Плоский яркий» (выбрана 10.10.2026) ---------- */
+:root {
+  --bg: #FFFDF6; --ink: #3C3C3C; --muted: #6B6B6B; --line: #E5E5E5;
+  --violet: #1CB0F6; --violet-d: #1899D6; --violet-l: #DDF4FF;
+  --green: #58CC02; --green-d: #46A302; --green-l: #D7FFB8;
+  --yellow: #FFC800; --yellow-d: #E5A800;
+  --radius: 18px;
+  --shadow: 0 4px 0 var(--line);
+}
+.btn { border-radius: 16px; }
+.btn:not(.soft):not(.yellow):not(.green) { background: var(--green); box-shadow: 0 5px 0 var(--green-d); }
+.btn:not(.soft):not(.yellow):not(.green):active { box-shadow: 0 1px 0 var(--green-d); }
+.btn.soft { color: var(--violet-d); border: 2px solid var(--line); }
+.btn.green { background: var(--green); }
+.card, .task-card, .reading, .bubble, .node, .skill, .tile { border: 2px solid var(--line); }
+.bubble::before { display: none; }
+.nav { background: rgba(255,253,246,.96); }
+.nav a .i { display: inline-flex; width: 28px; height: 28px; }
+.nav a .i svg { width: 100%; height: 100%; fill: currentColor; }
+.nav a.on { color: var(--violet-d); background: var(--violet-l); }
+.bar i { background: var(--green); }
+.opt { border-width: 2px; box-shadow: 0 4px 0 var(--line); }
+.opt.ok { border-color: var(--green); box-shadow: 0 4px 0 var(--green); }
+.node.next { outline-color: var(--green); animation: none; }
+.ic { display: inline-flex; width: 1em; height: 1em; vertical-align: -.12em; } .ic svg { width: 100%; height: 100%; fill: currentColor; }
+.tile .e .ic, .node .np .ic { width: 1em; height: 1em; }
+.tile .e { color: var(--ink); }
+.skill .lv .ic { color: var(--violet-d); }
+.task-card .go .ic { width: 1em; height: 1em; }
+.say-btn .ic { font-size: 1em; } .say-btn.big .ic { font-size: 1em; }
+.lvchange .big .ic { width: 1em; height: 1em; }
+.node .np .blob { display: grid; place-items: center; width: 64px; height: 64px; margin: 0 auto; border-radius: 16px; background: var(--violet); color: #fff; font-size: 36px; }
+.node.next .np .blob { background: var(--green); }
+.node.locked .np .blob { background: #D5D3DD; filter: none; opacity: 1; }
+.node .np { filter: none; }
+.tabs button .ic { margin-right: 4px; }

@@ -3,7 +3,10 @@
   'use strict';
   const KEY = 'nika-school-v1';
   const app = document.getElementById('app');
-  const LV = ['🔒', '🌱', '🌿', '🌳', '⭐', '🚀'];
+  const LV = ['🔒', '🌱', '🌿', '🌳', '⭐', '🚀']; // текстовые места (кабинет мамы, отчёты)
+  const ic = (n) => `<span class="ic">${window.ICONS[n] || ''}</span>`;
+  const LVI = ['lock', 'plant', 'leaf', 'tree', 'star', 'rocket-launch'].map(ic); // экраны Киры
+  const TI = { review: 'repeat', break: 'person-simple-run', explore: 'binoculars', code: 'robot', music: 'music-notes', feelings: 'heart', reading: 'book-open-text', math: 'calculator', russian: 'pencil-simple-line', words: 'text-aa', english: 'headphones', world: 'globe-hemisphere-west', logic: 'puzzle-piece', create: 'paint-brush', homework: 'camera' };
   const LVT = ['пока закрыто', 'начала', 'учусь', 'получается', 'освоила', 'готова дальше'];
   const BOX_DAYS = [0, 1, 3, 7, 21]; // коробки повторения: завтра, 3 дня, неделя, 3 недели
   const PRIO = { red: 0, yellow: 1, green: 2 };
@@ -90,7 +93,7 @@
     if (!on || lang === 'en') return t;
     return t.replace(/[А-Яа-яЁё]+/g, (w) => sylls(w).map((s, i) => `<span class="s${i % 2}">${s}</span>`).join(''));
   }
-  const sayBtn = (text, lang, cls) => `<button class="say-btn ${cls || ''}" data-say="${esc(text)}" data-lang="${lang || 'ru'}" aria-label="Прослушать">🔊</button>`;
+  const sayBtn = (text, lang, cls) => `<button class="say-btn ${cls || ''}" data-say="${esc(text)}" data-lang="${lang || 'ru'}" aria-label="Прослушать">${ic('speaker-high')}</button>`;
 
   // ---------- контент ----------
   // ---------- закрытый контент: data.enc шифруется паролем (build.js), здесь расшифровка ----------
@@ -560,12 +563,13 @@
 
   // ---------- каркас экрана ----------
   function shell(active, inner) {
-    const nav = [['today', '☀️', 'Сегодня'], ['map', '🗺️', 'Карта'], ['skills', '🌳', 'Навыки'], ['homework', '📷', 'Домашка']];
+    const ic = (n) => window.ICONS[n];
+    const nav = [['today', ic('sun'), 'Сегодня'], ['map', ic('map-trifold'), 'Карта'], ['skills', ic('tree'), 'Навыки'], ['homework', ic('camera'), 'Домашка']];
     return `<header class="top">
         <div class="brand">${Chars.html('nika', 'happy', 'sm')}<span>Учимся с Никой</span></div>
         <div class="grow"></div>
         <button class="iconbtn ${S.set.syll ? 'on' : ''}" data-act="syll" title="Показывать слоги цветом">сло·ги</button>
-        <a class="iconbtn ghost" href="#/parent" title="Для мамы" aria-label="Для мамы">⚙️</a>
+        <a class="iconbtn ghost" href="#/parent" title="Для мамы" aria-label="Для мамы"><span class="ic">${ic('gear')}</span></a>
       </header>
       <main>${inner}</main>
       <nav class="nav">${nav.map(([id, i, t]) => `<a href="#/${id}" class="${active === id ? 'on' : ''}"><span class="i">${i}</span>${t}</a>`).join('')}</nav>`;
@@ -574,8 +578,8 @@
     const s = skillOf(l), t = track(s.track);
     return `<button class="task-card" data-go="#/lesson/${l.id}">
       <div class="pic" style="background:${t.color}">${esc(l.pic || t.emoji)}</div>
-      <div><span class="tag ${tagCls || ''}">${esc(tag)}</span><div class="t">${esc(l.title)}</div><div class="m">${esc(t.title)} · ${lvl(s.id) ? LV[lvl(s.id)] : '🌱'} ${esc(s.title)}</div></div>
-      <div class="go">➜</div></button>`;
+      <div><span class="tag ${tagCls || ''}">${esc(tag)}</span><div class="t">${esc(l.title)}</div><div class="m">${esc(t.title)} · ${lvl(s.id) ? LVI[lvl(s.id)] : LVI[1]} ${esc(s.title)}</div></div>
+      <div class="go">${ic('arrow-right')}</div></button>`;
   }
 
   // ---------- экраны ----------
@@ -584,7 +588,7 @@
     closeDayIfNeeded();
     const dy = S.days[d];
     const note = dayNote(d);
-    const chip = `<span class="tag">${M.emoji} ${esc(M.title)}${note ? ' · ' + esc(note) : ''}</span>`;
+    const chip = `<span class="tag">${ic({ '🏫': 'house', '📚': 'books', '🎨': 'paint-brush', '🌙': 'moon' }[M.emoji] || 'sun')} ${esc(M.title)}${note ? ' · ' + esc(note) : ''}</span>`;
     const bubble = (who, mood, text, tag) => `<div class="hello"><div class="duo">${Chars.html('nika', who === 'nika' ? mood : 'happy')}${Chars.html('luna', who === 'luna' ? mood : 'happy', 'md')}</div>
       <div class="bubble">${tag ? `<div class="tag">${esc(tag)}</div>` : ''}<div>${text}</div></div></div>`;
     const momNote = S.parent.comment ? `<div class="card" style="margin-bottom:16px"><div class="tag yellow">Записка от мамы</div><div>${rich(S.parent.comment)}</div></div>` : '';
@@ -593,7 +597,7 @@
     if (mode === 'off' || mode === 'weekend') {
       let h = chip + bubble('nika', 'happy', `Привет, ${esc(S.name)}! ${esc(M.about)}`) + momNote;
       h += '<h2>Если хочется</h2><div class="tiles">';
-      for (const [tid, e, t] of [['create', '🎨', 'Создать'], ['book', '📚', 'Моя книга'], ['english', '🎧', 'English'], ['logic', '🧩', 'Загадка'], ['story', '👂', 'Послушать историю']]) {
+      for (const [tid, e, t] of [['create', ic('paint-brush'), 'Создать'], ['book', ic('books'), 'Моя книга'], ['english', ic('headphones'), 'English'], ['logic', ic('puzzle-piece'), 'Загадка'], ['story', ic('ear'), 'Послушать историю']]) {
         h += `<button class="tile" style="background:${track(tid === 'book' || tid === 'story' ? 'reading' : tid).color}" data-tile="${tid}"><span class="e">${e}</span>${t}</button>`;
       }
       return shell('today', h + '</div>' + (momLinks() ? `<h2>От мамы</h2><div class="cards">${momLinks()}</div>` : ''));
@@ -612,16 +616,16 @@
       const hi = dy.by === 'kira' ? 'Ты начала сама. Это и есть рабочее время.' : 'Рабочее время началось.';
       return shell('today', `${chip}${bubble('nika', 'proud', `${hi} Как ты сейчас?`)}
         <div class="tiles" style="max-width:640px">
-          <button class="tile" style="background:var(--green-l)" data-energy="ok"><span class="e">😊</span>Бодрая</button>
-          <button class="tile" style="background:var(--sun-l)" data-energy="meh"><span class="e">😐</span>Так себе</button>
-          <button class="tile" style="background:var(--peach-l)" data-energy="tired"><span class="e">😴</span>Устала</button></div>`);
+          <button class="tile" style="background:var(--green-l)" data-energy="ok"><span class="e">${ic('smiley')}</span>Бодрая</button>
+          <button class="tile" style="background:var(--sun-l)" data-energy="meh"><span class="e">${ic('smiley-meh')}</span>Так себе</button>
+          <button class="tile" style="background:var(--peach-l)" data-energy="tired"><span class="e">${ic('moon')}</span>Устала</button></div>`);
     }
 
     // конец дня
     if (dy.end) {
       const done = dy.steps.filter((x) => x.done && x.kind !== 'break').length;
       const extraBtns = !dy.extraLesson ? `<h2>Хочешь ещё одну?</h2><p class="sub">Только если правда хочется. Можно и закончить.</p><div class="tiles">
-          ${[['reading', '📖', 'История'], ['math', '🔢', 'Числа'], ['english', '🎧', 'English'], ['logic', '🧩', 'Загадка'], ['create', '🎨', 'Создать']].map(([tid, e, t]) => `<button class="tile" style="background:${track(tid).color}" data-extra="${tid}"><span class="e">${e}</span>${t}</button>`).join('')}</div>` : '';
+          ${[['reading', ic('book-open-text'), 'История'], ['math', ic('calculator'), 'Числа'], ['english', ic('headphones'), 'English'], ['logic', ic('puzzle-piece'), 'Загадка'], ['create', ic('paint-brush'), 'Создать']].map(([tid, e, t]) => `<button class="tile" style="background:${track(tid).color}" data-extra="${tid}"><span class="e">${e}</span>${t}</button>`).join('')}</div>` : '';
       const text = dy.refused ? 'Сегодня был лёгкий день. Это тоже нормально. Завтра продолжим.' : dy.timeUp ? 'Время вышло. На сегодня достаточно, остальное доделаем завтра.' : `На сегодня всё. Ты сделала шагов: ${done}. Отлично поработали.`;
       return shell('today', `${chip}<div class="done-screen"><div class="duo" style="justify-content:center">${Chars.html('nika', 'proud', 'jump')}${Chars.html('luna', 'happy', 'md jump')}</div>
         <h1>На сегодня всё</h1><p class="sub" style="font-size:22px">${esc(text)}</p></div>${extraBtns}${momLinks() ? `<h2>От мамы</h2><div class="cards">${momLinks()}</div>` : ''}`);
@@ -630,12 +634,12 @@
     // план дня
     const nx = nextStepOf(dy);
     const mins = activeMin(dy);
-    const icon = { review: '🔁', break: '🤸', explore: '🔭', code: '🤖', music: '🎵', feelings: '💛', reading: '📖', math: '🔢', russian: '✏️', words: '🔤', english: '🎧', world: '🌍', logic: '🧩', create: '🎨', homework: '📷' };
-    let list = dy.steps.map((x) => `<div class="skill" style="${x === nx ? 'outline:4px solid var(--violet)' : ''}"><div class="lv">${x.done ? '✅' : icon[x.track] || '•'}</div>
+    const icon = Object.fromEntries(Object.entries(TI).map(([k, v]) => [k, ic(v)]));
+    let list = dy.steps.map((x) => `<div class="skill" style="${x === nx ? 'outline:4px solid var(--violet)' : ''}"><div class="lv">${x.done ? ic('check-circle') : icon[x.track] || '•'}</div>
       <div><div>${esc(x.title)}</div><div class="st">${x.done ? 'готово' : x === nx ? 'сейчас' : 'потом'}</div></div></div>`).join('');
     let go = '';
     if (nx) {
-      if (nx.kind === 'break') go = `<button class="btn green" data-act="breakdone">🤸 Сделала, дальше</button>`;
+      if (nx.kind === 'break') go = `<button class="btn green" data-act="breakdone">${ic('person-simple-run')} Сделала, дальше</button>`;
       else go = `<button class="btn" data-act="nextstep">Дальше: ${esc(nx.title)}</button>`;
     }
     const brk = nx && nx.kind === 'break' ? bubble('luna', 'happy', `Разминка! ${esc(nx.move || 'Встань и потянись.')} Потом попей воды.`) : '';
@@ -652,9 +656,9 @@
       <p class="sub">Если хочешь, скажи почему (можно не выбирать):</p>
       <div class="row" style="margin-bottom:20px">${reasons.map(([k, t]) => `<button class="btn ${sel === k ? '' : 'soft'} small" data-reason="${k}">${t}</button>`).join('')}</div>
       <div class="tiles" style="max-width:720px">
-        <button class="tile" style="background:var(--sky-l)" data-mini="story"><span class="e">👂</span>Послушать историю</button>
-        <button class="tile" style="background:var(--sun-l)" data-mini="riddle"><span class="e">🧩</span>Одна загадка</button>
-        <button class="tile" style="background:var(--peach-l)" data-mini="words"><span class="e">🔤</span>3 слова</button></div>
+        <button class="tile" style="background:var(--sky-l)" data-mini="story"><span class="e">${ic('ear')}</span>Послушать историю</button>
+        <button class="tile" style="background:var(--sun-l)" data-mini="riddle"><span class="e">${ic('puzzle-piece')}</span>Одна загадка</button>
+        <button class="tile" style="background:var(--peach-l)" data-mini="words"><span class="e">${ic('text-aa')}</span>3 слова</button></div>
       <div class="pfoot"><button class="btn soft small" data-go="#/today">Назад</button></div>`);
   }
 
@@ -664,15 +668,14 @@
     const ls = C.lessons.filter((l) => skillOf(l).track === tid);
     const firstNext = ls.find((l) => lessonOpen(l) && !isDone(l));
     const decos = { reading: ['🌳', '🍄', '🦆'], math: ['🌻', '🐝', '🏡'], words: ['📜', '🖋️', '🕯️'], english: ['🎈', '⛵', '🏰'], logic: ['🧩', '🔺', '🟡'], create: ['🎨', '🖌️', '🌈'] }[tid] || ['⭐'];
-    let h = `<h1>Карта</h1><div class="tabs">${C.tracks.map((x) => `<button data-tab="${x.id}" class="${x.id === tid ? 'on' : ''}">${x.emoji} ${esc(x.title)}</button>`).join('')}</div>`;
+    let h = `<h1>Карта</h1><div class="tabs">${C.tracks.map((x) => `<button data-tab="${x.id}" class="${x.id === tid ? 'on' : ''}">${TI[x.id] ? ic(TI[x.id]) : ''} ${esc(x.title)}</button>`).join('')}</div>`;
     h += `<div class="world" style="background:${t.color}"><svg class="path"></svg>`;
-    decos.forEach((d, i) => { h += `<span class="deco" style="top:${12 + i * 30}%;${i % 2 ? 'left' : 'right'}:3%">${d}</span>`; });
     ls.forEach((l) => {
       const open = lessonOpen(l), done = isDone(l), s = skillOf(l);
       const cls = !open ? 'locked' : (l === firstNext ? 'next' : '');
-      const status = done ? `${LV[Math.max(1, lvl(s.id))]} ${LVT[Math.max(1, lvl(s.id))]}` : open ? (l.repeat ? 'можно много раз' : 'Начать') : '🔒 ' + lockReason(l);
+      const status = done ? `${LVI[Math.max(1, lvl(s.id))]} ${esc(LVT[Math.max(1, lvl(s.id))])}` : open ? (l.repeat ? 'можно много раз' : 'Начать') : `${LVI[0]} ${esc(lockReason(l))}`;
       h += `<div class="node-row"><button class="node ${cls}" ${open ? `data-go="#/lesson/${l.id}"` : 'disabled'}>
-        ${done ? '<span class="check">✓</span>' : ''}<div class="np">${esc(l.pic || t.emoji)}</div><div class="nt">${esc(l.title)}</div><div class="ns">${esc(status)}</div></button></div>`;
+        ${done ? '<span class="check">✓</span>' : ''}<div class="np"><span class="blob">${ic(TI[tid] || 'star')}</span></div><div class="nt">${esc(l.title)}</div><div class="ns">${done || !open ? status : esc(status)}</div></button></div>`;
     });
     h += '</div>';
     return shell('map', h);
@@ -702,7 +705,7 @@
       for (const s of ss) {
         const v = lvl(s.id), open = skillOpen(s), st = S.skills[s.id];
         const note = !open ? 'Откроется позже' : v === 0 ? 'Ещё не начинали' : st && st.box > 0 ? `Повторим ${fmtDay(st.due)}` : LVT[v];
-        h += `<div class="skill"><div class="lv">${open ? (v ? LV[v] : '○') : '🔒'}</div><div><div>${esc(s.title)}</div><div class="st">${esc(note)}</div></div>
+        h += `<div class="skill"><div class="lv">${open ? (v ? LVI[v] : '○') : LVI[0]}</div><div><div>${esc(s.title)}</div><div class="st">${esc(note)}</div></div>
           <div class="dots">${[1, 2, 3, 4, 5].map((i) => `<i class="${v >= i ? 'f' : ''}"></i>`).join('')}</div></div>`;
       }
     }
@@ -713,8 +716,8 @@
     const hw = C.lessons.filter((l) => l.homework || skillOf(l).track === 'homework');
     let h = `<h1>Домашка</h1>
       <div class="hello">${Chars.html('luna', 'think', 'md')}<div class="bubble">Сфотографируй задание, которое не получается. Мама пришлёт его мне, и здесь появится разбор по шагам.</div></div>
-      <div class="card"><div id="camwrap"><div class="row"><button class="btn" data-act="cam">📷 Включить камеру</button>
-      <label class="btn soft">📁 Выбрать фото<input type="file" accept="image/*,.pdf" data-act="file" hidden></label></div></div></div>`;
+      <div class="card"><div id="camwrap"><div class="row"><button class="btn" data-act="cam">${ic('camera')} Включить камеру</button>
+      <label class="btn soft">${ic('folder-simple')} Выбрать фото<input type="file" accept="image/*,.pdf" data-act="file" hidden></label></div></div></div>`;
     h += '<h2>Разборы от мамы</h2>';
     h += hw.length ? `<div class="cards">${hw.map((l) => lessonCard(l, isDone(l) ? 'Разобрали' : 'Новый разбор', isDone(l) ? 'green' : 'yellow')).join('')}</div>` : '<p class="sub">Пока разборов нет.</p>';
     return shell('homework', h);
@@ -753,7 +756,7 @@
     const url = URL.createObjectURL(blob);
     const d = new Date(), name = `домашка_${dstr(d)}_${z(d.getHours())}-${z(d.getMinutes())}.${blob.type === 'application/pdf' ? 'pdf' : 'jpg'}`;
     document.getElementById('camwrap').innerHTML = `${blob.type.startsWith('image') ? `<img class="shot" src="${url}" alt="Фото задания">` : '<p>Файл выбран.</p>'}
-      <div class="pfoot"><a class="btn green" href="${url}" download="${name}">💾 Сохранить для мамы</a><button class="btn soft" data-go="#/homework">Переснять</button></div>
+      <div class="pfoot"><a class="btn green" href="${url}" download="${name}">${ic('floppy-disk')} Сохранить для мамы</a><button class="btn soft" data-go="#/homework">Переснять</button></div>
       <p class="sub" id="hwstatus">Отправляю маме…</p>`;
     if (blob.type.startsWith('image')) {
       uploadHomework(blob, `homework/${dstr(d)}_${z(d.getHours())}${z(d.getMinutes())}${z(d.getSeconds())}.jpg`).then((st) => {
@@ -885,24 +888,24 @@
     // лестница подсказок
     const hints = (t.hints && t.hints.length ? t.hints : GENERIC_HINTS);
     for (let k = 0; k < ts.hints && k < hints.length; k++) {
-      body += `<div class="hintbox"><b>💡 ${HINT_LABELS[k] || 'Подсказка'}:</b><span>${rich(hints[k])}</span></div>`;
+      body += `<div class="hintbox"><b>${ic('lightbulb')} ${HINT_LABELS[k] || 'Подсказка'}:</b><span>${rich(hints[k])}</span></div>`;
     }
-    if (ts.revealed) body += `<div class="hintbox"><b>🙋 Дальше вместе:</b><span>Это правда трудная задача. Позови маму, вы разберёте её вместе. Или пропусти пока, мы к ней вернёмся.</span></div>`;
-    if (ts.instr) body += `<div class="hintbox"><b>🤔 Что делать:</b><span>${rich(ts.instr)}</span></div>`;
+    if (ts.revealed) body += `<div class="hintbox"><b>${ic('hand-waving')} Дальше вместе:</b><span>Это правда трудная задача. Позови маму, вы разберёте её вместе. Или пропусти пока, мы к ней вернёмся.</span></div>`;
+    if (ts.instr) body += `<div class="hintbox"><b>${ic('question')} Что делать:</b><span>${rich(ts.instr)}</span></div>`;
     if (ts.wordHelp) body += ts.wordHelp.length ? ts.wordHelp.map((w) => `<div class="hintbox"><b>${esc(w.pic)} ${rich(w.word)}:</b><span>${rich(w.simple)}</span></div>`).join('')
-      : `<div class="hintbox"><b>🔤 Слово:</b><span>Найди непонятное слово и посмотри на слова рядом с ним. Если не выходит, спроси маму, что оно значит.</span></div>`;
+      : `<div class="hintbox"><b>${ic('text-aa')} Слово:</b><span>Найди непонятное слово и посмотри на слова рядом с ним. Если не выходит, спроси маму, что оно значит.</span></div>`;
     body += tutorHtml();
     if (ts.menu) {
       const opts = [];
-      if (!ts.audioOn) opts.push(['reading', '👀', 'Не могу прочитать']);
-      opts.push(['word', '🔤', 'Не понимаю слово']);
-      opts.push(['instruction', '🤔', 'Не понимаю, что делать']);
-      if (isCheckable(t) && !ts.solved && !ts.revealed) opts.push(['solve', '🧩', 'Не знаю, как решить']);
+      if (!ts.audioOn) opts.push(['reading', ic('eye'), 'Не могу прочитать']);
+      opts.push(['word', ic('text-aa'), 'Не понимаю слово']);
+      opts.push(['instruction', ic('question'), 'Не понимаю, что делать']);
+      if (isCheckable(t) && !ts.solved && !ts.revealed) opts.push(['solve', ic('puzzle-piece'), 'Не знаю, как решить']);
       body += `<div class="card" style="margin-top:16px"><div class="tag yellow">Что трудно?</div><div class="tiles">${opts.map(([k, e, txt]) => `<button class="tile" style="background:var(--sun-l)" data-help="${k}"><span class="e">${e}</span>${txt}</button>`).join('')}</div></div>`;
     }
 
     let foot = '';
-    const helpBtn = `<button class="btn yellow ${isCheckable(t) ? '' : 'small'}" data-act="helpmenu">💡 Мне трудно</button>`;
+    const helpBtn = `<button class="btn yellow ${isCheckable(t) ? '' : 'small'}" data-act="helpmenu">${ic('lightbulb')} Мне трудно</button>`;
     if (t.type === 'info' || t.type === 'word') foot = `${helpBtn}<button class="btn" data-act="next">Дальше</button>`;
     else if (t.type === 'say') foot = `${helpBtn}<button class="btn green" data-act="next">${esc(t.done || 'Готово')}</button>`;
     else if (t.type === 'listen') foot = `<button class="btn green" data-act="next">Дослушала</button>`;
@@ -991,7 +994,7 @@
       if (after >= 3 && before < 3) { const m = mastery(id); if (m.n <= 8) logAdapt(`«${C.skillById[id].title}» освоена быстрее плана`, `верно ${pct(m.acc)} за ${m.n} заданий, без подсказок ${pct(m.indep)}`); }
       if (after >= 1 && after < 2 && mastery(id).enough && mastery(id).acc < 0.5) logAdapt(`По «${C.skillById[id].title}» добавлена практика полегче`, `верно только ${pct(mastery(id).acc)} заданий`);
       if (after >= 3 && !s.box) { s.box = 1; s.due = addDays(BOX_DAYS[1]); } // получается: ставим в повторение
-      lines = `<div class="lvchange">${esc(C.skillById[id].title)}: <span class="big">${LV[Math.max(1, before)]}</span> ➜ <span class="big">${LV[Math.max(1, after)]}</span></div>
+      lines = `<div class="lvchange">${esc(C.skillById[id].title)}: <span class="big">${LVI[Math.max(1, before)]}</span> ${ic('arrow-right')} <span class="big">${LVI[Math.max(1, after)]}</span></div>
         <p class="sub">${esc(LVT[Math.max(1, after)])}${s.box ? ` · вспомним ${fmtDay(s.due)}` : ''}</p>`;
     } else {
       const bySkill = {};
@@ -1195,7 +1198,7 @@
     return h;
   }
 
-  const momLinks = () => (S.parent.links || []).map((l) => `<a class="task-card" href="${esc(l.url)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><div class="pic" style="background:var(--sky-l)">🔗</div><div><span class="tag">От мамы</span><div class="t">${esc(l.title)}</div><div class="m">${esc(l.note || '')}</div></div><div class="go">➜</div></a>`).join('');
+  const momLinks = () => (S.parent.links || []).map((l) => `<a class="task-card" href="${esc(l.url)}" target="_blank" rel="noopener" style="text-decoration:none;color:inherit"><div class="pic" style="background:var(--sky-l)">🔗</div><div><span class="tag">От мамы</span><div class="t">${esc(l.title)}</div><div class="m">${esc(l.note || '')}</div></div><div class="go">${ic('arrow-right')}</div></a>`).join('');
   function parentTools() {
     const links = S.parent.links || [];
     return `<h2>Ссылка или задание для Киры</h2><div class="card"><p class="small">Видео, мастер-класс, упражнение на другом сайте. Появится у Киры в выходной и в конце учебного дня как «От мамы». Отметка «сделала» у внешних ресурсов системой не проверяется.</p>
