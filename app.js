@@ -11,18 +11,19 @@
   const BOX_DAYS = [0, 1, 3, 7, 21]; // коробки повторения: завтра, 3 дня, неделя, 3 недели
   const PRIO = { red: 0, yellow: 1, green: 2 };
   const BOOK_PAGES = 25; // ponytail: весь 1 класс = 25 тем; поменять, если план книги изменится
-  // Мастерская: 10 поделок первого месяца из исследования 16.10 (кира-обучение/10_ЛЕПКА_ПОЛИМЕРНАЯ_ГЛИНА.md). YouTube в России только через VPN, поэтому где нашёлся урок на RuTube, он идёт первым (у бабушки с дедушкой YouTube не открывается).
+  // Мастерская: 10 поделок + Гарфилд первого месяца из исследования 16.10 (кира-обучение/10_ЛЕПКА_ПОЛИМЕРНАЯ_ГЛИНА.md). YouTube в России только через VPN, поэтому где нашёлся урок на RuTube, он идёт первым (у бабушки с дедушкой YouTube не открывается).
   const CLAY = [
     ['🔴', 'Простая малина', 'Большой шарик, много маленьких, листики зубочисткой', 'https://www.youtube.com/watch?v=HDDLD7_TH1g', 'рус.', 'https://rutube.ru/video/88a582128aeba98185433a2da8be16ae/'],
-    ['🙂', 'Малина с лицом', 'Придумай ей глазки, щёчки и имя', 'https://www.youtube.com/watch?v=LMHMghmyZ04', 'англ., смотри без звука'],
-    ['🍓', 'Клубничка с лицом', 'Конус и листики-капельки', 'https://www.youtube.com/watch?v=LMHMghmyZ04', 'англ., смотри без звука'],
+    ['🙂', 'Малина с лицом', 'Слепи малину как в первом уроке и придумай ей глазки, щёчки и имя', 'https://www.youtube.com/watch?v=LMHMghmyZ04', 'англ., смотри без звука', 'https://rutube.ru/video/88a582128aeba98185433a2da8be16ae/'],
+    ['🍓', 'Клубничка с лицом', 'Конус и листики-капельки', 'https://www.youtube.com/watch?v=LMHMghmyZ04', 'англ., смотри без звука', 'https://rutube.ru/video/4ca472da4d76df64fb618550156cefe1/'],
     ['🌼', 'Ромашки с божьей коровкой', 'Одинаковые капельки по кругу', 'https://www.youtube.com/watch?v=dHaag9zW-rw', 'рус.', 'https://rutube.ru/video/57c7b90b2e785ae167c0a9d87fea9a1e/'],
-    ['🐱', 'Котик-шарик', 'Котик из одного шарика', 'https://www.youtube.com/watch?v=fBNARNOFDAw', 'англ., смотри без звука'],
+    ['🐱', 'Котик', 'Котик с большой головой, как игрушка', 'https://www.youtube.com/watch?v=fBNARNOFDAw', 'англ., смотри без звука', 'https://rutube.ru/video/ebb35492ca6f0114177097761f26af85/'],
     ['🐸', 'Лягушонок', 'Как прикрепить детали, чтобы не отвалились', 'https://www.youtube.com/watch?v=0iynsrWIXJg', 'англ., смотри без звука'],
-    ['🍩', 'Пончик и планета', 'Узор щёткой и цвета «мрамором»', 'https://www.youtube.com/watch?v=TE0uhScWznc', 'англ., смотри без звука'],
-    ['🐌', 'Улитка', 'Длинная ровная колбаска и спираль', 'https://www.youtube.com/watch?v=CgDSUaYKJu8', 'англ., смотри без звука'],
+    ['🍩', 'Пончик-единорог', 'Пончик с глазурью и рожком', 'https://www.youtube.com/watch?v=TE0uhScWznc', 'англ., смотри без звука', 'https://rutube.ru/video/1d1ecaee3372d9d882d34e856541b948/'],
+    ['🐌', 'Улитка', 'Длинная ровная колбаска и спираль. Лезвием режет взрослый', 'https://www.youtube.com/watch?v=CgDSUaYKJu8', 'англ., смотри без звука', 'https://rutube.ru/video/07504b1024e7b4a9bf3b4aba1231b97d/'],
     ['🎀', 'Подвеска на шнурке', 'Дырочку зубочисткой до запекания, шнурок после', '', 'своё'],
-    ['💎', 'Настоящая малина', 'Если первые понравились', 'https://www.youtube.com/watch?v=4M75F5iN1m0', 'рус.']
+    ['💎', 'Настоящая малина', 'Если первые понравились', 'https://www.youtube.com/watch?v=4M75F5iN1m0', 'рус.', 'https://rutube.ru/video/b3e7c36d8ee15f22ff0a74616bc7bf1d/'],
+    ['🐈', 'Гарфилд', 'Сюрприз: любимый кот из мультика', '', '', 'https://rutube.ru/video/bc23c3f2e5dbc7b1da25b82850974336/']
   ];
   const BOOK_HEROES = ['private/heroes/ladybug.png', 'private/heroes/noir.png', 'private/heroes/garfield-idea.png', 'private/heroes/harry.png'];
   const HINT_LABELS = ['Скажу проще', 'Подсказка', 'Пример', 'По шагам', 'Попробуй полегче'];
@@ -1153,7 +1154,7 @@
     return shell('clay', `<div class="hello">${Chars.html('nika', 'happy')}<div class="bubble">${n ? `Уже ${n} ${plural(n, ['поделка', 'поделки', 'поделок'])}! Что лепим сегодня?` : 'Это твоя мастерская. Выбирай, что слепить. Можно по порядку, можно любую, можно одну и ту же пять раз.'}</div></div>
       <div class="card"><h2>Перед лепкой</h2><p>🧼 Моем руки · 🍪 во время лепки не едим · ✋ мнём глину, пока не станет тёплой · 🔥 в духовку ставит только взрослый</p></div>
       ${CLAY.map(([e, t, d, url, lang, ru], i) => `<div class="card clay ${done[i] ? 'got' : ''}"><div class="pic">${e}</div><div class="grow"><h3>${i + 1}. ${t}</h3><p class="muted">${d}</p>
-        <div class="row">${ru ? `<a class="btn small" href="${ru}" target="_blank" rel="noopener">${ic('play')} Смотреть урок</a><a class="muted small" href="${url}" target="_blank" rel="noopener">или на YouTube</a>` : url ? `<a class="btn soft small" href="${url}" target="_blank" rel="noopener">${ic('play')} Урок на YouTube</a><span class="muted small">${lang}, открывается дома</span>` : '<span class="muted small">Без урока: придумай сама</span>'}
+        <div class="row">${ru ? `<a class="btn small" href="${ru}" target="_blank" rel="noopener">${ic('play')} Смотреть урок</a>${url ? `<a class="muted small" href="${url}" target="_blank" rel="noopener">или на YouTube</a>` : ''}` : url ? `<a class="btn soft small" href="${url}" target="_blank" rel="noopener">${ic('play')} Урок на YouTube</a><span class="muted small">${lang}, открывается дома</span>` : '<span class="muted small">Без урока: придумай сама</span>'}
         <button class="btn ${done[i] ? 'soft' : 'yellow'} small" data-clay="${i}">${done[i] ? '⭐ Сделала' : 'Я сделала!'}</button></div></div></div>`).join('')}
       <p class="muted small" style="text-align:center">Получилось криво? Это «дикая малина», так тоже бывает. Урок не открывается? Слепи по картинке в голове или выбери малину: она открывается везде.</p>`);
   }
