@@ -11,6 +11,19 @@
   const BOX_DAYS = [0, 1, 3, 7, 21]; // коробки повторения: завтра, 3 дня, неделя, 3 недели
   const PRIO = { red: 0, yellow: 1, green: 2 };
   const BOOK_PAGES = 25; // ponytail: весь 1 класс = 25 тем; поменять, если план книги изменится
+  // Мастерская: 10 поделок первого месяца из исследования 16.10 (кира-обучение/10_ЛЕПКА_ПОЛИМЕРНАЯ_ГЛИНА.md). YouTube в России только через VPN.
+  const CLAY = [
+    ['🔴', 'Простая малина', 'Большой шарик, много маленьких, листики зубочисткой', 'https://www.youtube.com/watch?v=HDDLD7_TH1g', 'рус.'],
+    ['🙂', 'Малина с лицом', 'Придумай ей глазки, щёчки и имя', 'https://www.youtube.com/watch?v=LMHMghmyZ04', 'англ., смотри без звука'],
+    ['🍓', 'Клубничка с лицом', 'Конус и листики-капельки', 'https://www.youtube.com/watch?v=LMHMghmyZ04', 'англ., смотри без звука'],
+    ['🌼', 'Ромашки с божьей коровкой', 'Одинаковые капельки по кругу', 'https://www.youtube.com/watch?v=dHaag9zW-rw', 'рус.'],
+    ['🐱', 'Котик-шарик', 'Котик из одного шарика', 'https://www.youtube.com/watch?v=fBNARNOFDAw', 'англ., смотри без звука'],
+    ['🐸', 'Лягушонок', 'Как прикрепить детали, чтобы не отвалились', 'https://www.youtube.com/watch?v=0iynsrWIXJg', 'англ., смотри без звука'],
+    ['🍩', 'Пончик и планета', 'Узор щёткой и цвета «мрамором»', 'https://www.youtube.com/watch?v=TE0uhScWznc', 'англ., смотри без звука'],
+    ['🐌', 'Улитка', 'Длинная ровная колбаска и спираль', 'https://www.youtube.com/watch?v=CgDSUaYKJu8', 'англ., смотри без звука'],
+    ['🎀', 'Подвеска на шнурке', 'Дырочку зубочисткой до запекания, шнурок после', '', 'своё'],
+    ['💎', 'Настоящая малина', 'Если первые понравились', 'https://www.youtube.com/watch?v=4M75F5iN1m0', 'рус.']
+  ];
   const BOOK_HEROES = ['private/heroes/ladybug.png', 'private/heroes/noir.png', 'private/heroes/garfield-idea.png', 'private/heroes/harry.png'];
   const HINT_LABELS = ['Скажу проще', 'Подсказка', 'Пример', 'По шагам', 'Попробуй полегче'];
   const GENERIC_HINTS = ['Прочитай задание ещё раз медленно, по слогам.', 'Ответ прячется в тексте или на картинке. Найди нужное место пальцем.'];
@@ -573,7 +586,7 @@
   // ---------- каркас экрана ----------
   function shell(active, inner) {
     const ic = (n) => window.ICONS[n];
-    const nav = [['book', ic('book-open-text'), 'Книга'], ['today', ic('sun'), 'Сегодня'], ['map', ic('map-trifold'), 'Карта'], ['skills', ic('tree'), 'Навыки'], ['homework', ic('camera'), 'Домашка']];
+    const nav = [['book', ic('book-open-text'), 'Книга'], ['today', ic('sun'), 'Сегодня'], ['map', ic('map-trifold'), 'Карта'], ['skills', ic('tree'), 'Навыки'], ['homework', ic('camera'), 'Домашка'], ['clay', ic('paint-brush'), 'Лепка']];
     return `<header class="top">
         <div class="brand">${Chars.html('nika', 'happy', 'sm')}<span>Учимся с Никой</span></div>
         <div class="grow"></div>
@@ -1135,6 +1148,15 @@
       ${next ? `<div class="pfoot"><button class="btn green" data-go="#/lesson/${next.id}">${got ? 'Следующее приключение' : 'Начать приключение'}</button></div>` : '<p class="sub">Все готовые приключения пройдены. Скоро появятся новые страницы.</p>'}</div>
       ${got ? `<p class="muted small" style="text-align:center">Код для мамы: ${bookCode()}</p>` : ''}`);
   }
+  function viewClay() {
+    const done = S.clay || {}, n = Object.keys(done).length;
+    return shell('clay', `<div class="hello">${Chars.html('nika', 'happy')}<div class="bubble">${n ? `Уже ${n} ${plural(n, ['поделка', 'поделки', 'поделок'])}! Что лепим сегодня?` : 'Это твоя мастерская. Выбирай, что слепить. Можно по порядку, можно любую, можно одну и ту же пять раз.'}</div></div>
+      <div class="card"><h2>Перед лепкой</h2><p>🧼 Моем руки · 🍪 во время лепки не едим · ✋ мнём глину, пока не станет тёплой · 🔥 в духовку ставит только взрослый</p></div>
+      ${CLAY.map(([e, t, d, url, lang], i) => `<div class="card clay ${done[i] ? 'got' : ''}"><div class="pic">${e}</div><div class="grow"><h3>${i + 1}. ${t}</h3><p class="muted">${d}</p>
+        <div class="row">${url ? `<a class="btn small" href="${url}" target="_blank" rel="noopener">${ic('play')} Смотреть урок</a><span class="muted small">${lang}</span>` : '<span class="muted small">Без урока: придумай сама</span>'}
+        <button class="btn ${done[i] ? 'soft' : 'yellow'} small" data-clay="${i}">${done[i] ? '⭐ Сделала' : 'Я сделала!'}</button></div></div></div>`).join('')}
+      <p class="muted small" style="text-align:center">Получилось криво? Это «дикая малина», так тоже бывает. Если урок не открывается, попроси взрослого.</p>`);
+  }
   function viewBookDone(l) {
     const got = bookLessons().filter(isDone).length;
     const todayN = bookLessons().filter((x) => S.lessons[x.id] && S.lessons[x.id].at === today()).length;
@@ -1573,7 +1595,7 @@
     if (page === 'review') { startReview(); return; }
     if (page === 'practice') { startPractice(arg); return; }
     P = null;
-    const views = { path: viewPath, today: viewToday, nowant: viewNoWant, map: () => viewMap(arg), skills: viewSkills, homework: viewHomework, parent: viewParent, book: viewBook };
+    const views = { path: viewPath, today: viewToday, nowant: viewNoWant, map: () => viewMap(arg), skills: viewSkills, homework: viewHomework, parent: viewParent, book: viewBook, clay: viewClay };
     app.innerHTML = (views[page] || viewToday)();
     window.scrollTo(0, 0);
     if (!views[page] || page === 'today') { const iv = setInterval(() => { if (!P) app.innerHTML = viewToday(); }, 60000); cleanup = () => clearInterval(iv); }
@@ -1586,6 +1608,7 @@
     if (el.dataset.say != null) { speak(el.dataset.say, el.dataset.lang); return; }
     if (el.dataset.act === 'voice') { toggleVoice(el); return; }
     if (el.dataset.go) { location.hash = el.dataset.go; return; }
+    if (el.dataset.clay != null) { const c = S.clay = S.clay || {}, i = el.dataset.clay; if (c[i]) delete c[i]; else c[i] = today(); save(); route(); return; }
     if (el.dataset.act === 'syll') { S.set.syll = !S.set.syll; save(); P ? renderPlayer() : route(); return; }
     if (P) { onPlayerClick(el); return; }
     if (el.dataset.tab) { location.hash = '#/map/' + el.dataset.tab; return; }

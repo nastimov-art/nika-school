@@ -357,3 +357,11 @@ textarea.field { min-height: 110px; resize: vertical; font-weight: 600; }
 @keyframes breathe { 50% { transform: scale(1.03, .98); } }
 @media (max-width: 700px) { .stage > .stage-hero { display: none; } .hero-pic { width: 96px; height: 116px; } .frame { padding: 10px; gap: 10px; } }
 @media (prefers-reduced-motion: reduce) { .hero-pic, .frame { animation: none; } }
+
+/* мастерская */
+.card.clay { display: flex; gap: 16px; align-items: flex-start; }
+.card.clay .pic { font-size: 44px; line-height: 1; flex: none; }
+.card.clay.got { background: #fff6dd; }
+.card.clay h3 { margin: 0 0 4px; }
+.card.clay .row { flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; }
+.card.clay a.btn { text-decoration: none; }
