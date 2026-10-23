@@ -573,7 +573,7 @@
   // ---------- каркас экрана ----------
   function shell(active, inner) {
     const ic = (n) => window.ICONS[n];
-    const nav = [['today', ic('sun'), 'Сегодня'], ['book', ic('book-open-text'), 'Книга'], ['map', ic('map-trifold'), 'Карта'], ['skills', ic('tree'), 'Навыки'], ['homework', ic('camera'), 'Домашка']];
+    const nav = [['book', ic('book-open-text'), 'Книга'], ['today', ic('sun'), 'Сегодня'], ['map', ic('map-trifold'), 'Карта'], ['skills', ic('tree'), 'Навыки'], ['homework', ic('camera'), 'Домашка']];
     return `<header class="top">
         <div class="brand">${Chars.html('nika', 'happy', 'sm')}<span>Учимся с Никой</span></div>
         <div class="grow"></div>
@@ -1109,7 +1109,7 @@
         wrongs: ts.wrongs, hints: ts.hints, revealed: true, skipped: true, u: !!t.u, errs: ts.errs, help: ts.help, audio: ts.audioOn, d: t.d || P.diff || 1, fmt: t.type });
       nextStep(); return;
     }
-    if (act === 'exit') { if (confirm('Выйти из урока? Прогресс этого урока не сохранится.')) { P = null; location.hash = '#/today'; } return; }
+    if (act === 'exit') { if (confirm('Выйти из урока? Прогресс этого урока не сохранится.')) { const bk = P.lesson.book; P = null; location.hash = bk ? '#/book' : '#/today'; } return; }
   }
 
   // ---------- книга героев: проверка 1 класса ----------
@@ -1563,7 +1563,7 @@
   function route() {
     if (cleanup) { cleanup(); cleanup = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
-    const [, page, arg] = (location.hash || '#/today').split('/');
+    const [, page, arg] = (location.hash || '#/book').split('/'); // на каникулах первый экран книга героев
     if (!S.name || !S.worlds.length) {
       if (page !== 'onboarding') { location.hash = '#/onboarding/' + (S.name ? 2 : 1); return; }
       app.innerHTML = viewOnboarding(+arg); return;
@@ -1635,7 +1635,7 @@
     }
     const act = el.dataset.act;
     if (act === 'name') { const v = document.getElementById('nm').value.trim(); if (!v) return; S.name = v; save(); location.hash = '#/onboarding/2'; return; }
-    if (act === 'worlds') { S.worlds = pickedWorlds.slice(); save(); location.hash = '#/today'; return; }
+    if (act === 'worlds') { S.worlds = pickedWorlds.slice(); save(); location.hash = '#/book'; return; }
     if (act === 'cam') { startCam(); return; }
     if (act === 'snap') { snap(); return; }
     if (act === 'bookcode') {
