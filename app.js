@@ -1749,5 +1749,9 @@
   document.body.classList.toggle('syll', S.set.syll);
   unlock().then(loadContent).then((c) => { C = c; pickedWorlds = S.worlds.slice(); route(); flushOutbox(); checkTutor(); })
     .catch((e) => { app.innerHTML = `<div class="boot">Не получилось загрузить уроки. Проверь интернет и обнови страницу.<br><small>${esc(e.message)}</small></div>`; });
-  if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && location.protocol === 'https:') {
+    // новая версия сайта встала: перезагружаем сразу, а не со второго открытия (но не посреди задания)
+    if (navigator.serviceWorker.controller) navigator.serviceWorker.addEventListener('controllerchange', () => { if (!P) location.reload(); });
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
 })();
