@@ -337,3 +337,23 @@ textarea.field { min-height: 110px; resize: vertical; font-weight: 600; }
 .node.locked .np .blob { background: #D5D3DD; filter: none; opacity: 1; }
 .node .np { filter: none; }
 .tabs button .ic { margin-right: 4px; }
+
+/* ---------- книга героев ---------- */
+.frame { display: flex; gap: 14px; align-items: center; border: 3px solid var(--ink); border-radius: 18px; padding: 12px; margin: 0 0 12px; background: #fff; animation: fpop .45s ease both; }
+.frame:nth-child(even) { flex-direction: row-reverse; }
+.frame .bubble { flex: 1; margin: 0; }
+.frame .char { flex: none; }
+.hero-pic { width: 130px; height: 150px; flex: none; object-fit: contain; filter: drop-shadow(0 6px 6px rgba(43, 35, 80, .18)); animation: hjump .5s ease both, breathe 3s ease-in-out .6s infinite; transform-origin: 50% 100%; }
+.hero-pic.big { width: 200px; height: 220px; display: block; margin: 0 auto; }
+.stage-hero { width: 110px; height: 130px; }
+.sign { display: inline-block; background: #fff; border: 2px dashed var(--coral); color: var(--coral); border-radius: 10px; padding: 0 8px; margin: 2px; font-weight: 900; letter-spacing: 1px; }
+.heroes { display: flex; justify-content: center; gap: 4px; flex-wrap: wrap; margin: 8px 0; }
+.heroes .hero-pic { width: 90px; height: 110px; }
+.bpages { display: grid; grid-template-columns: repeat(auto-fill, minmax(38px, 46px)); gap: 6px; margin: 8px 0; }
+.bpage { aspect-ratio: 3 / 4; border-radius: 8px; border: 2px dashed var(--line); display: grid; place-items: center; font-size: 13px; color: var(--muted); }
+.bpage.got { border: 2px solid var(--yellow-d); background: var(--sun-l); font-size: 22px; }
+@keyframes fpop { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes hjump { 0% { opacity: 0; transform: translateY(30px) scale(.8); } 70% { transform: translateY(-6px) scale(1.03); } 100% { opacity: 1; transform: none; } }
+@keyframes breathe { 50% { transform: scale(1.03, .98); } }
+@media (max-width: 700px) { .stage > .stage-hero { display: none; } .hero-pic { width: 96px; height: 116px; } .frame { padding: 10px; gap: 10px; } }
+@media (prefers-reduced-motion: reduce) { .hero-pic, .frame { animation: none; } }

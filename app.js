@@ -10,6 +10,8 @@
   const LVT = ['пока закрыто', 'начала', 'учусь', 'получается', 'освоила', 'готова дальше'];
   const BOX_DAYS = [0, 1, 3, 7, 21]; // коробки повторения: завтра, 3 дня, неделя, 3 недели
   const PRIO = { red: 0, yellow: 1, green: 2 };
+  const BOOK_PAGES = 25; // ponytail: весь 1 класс = 25 тем; поменять, если план книги изменится
+  const BOOK_HEROES = ['private/heroes/ladybug.png', 'private/heroes/noir.png', 'private/heroes/garfield-idea.png', 'private/heroes/harry.png'];
   const HINT_LABELS = ['Скажу проще', 'Подсказка', 'Пример', 'По шагам', 'Попробуй полегче'];
   const GENERIC_HINTS = ['Прочитай задание ещё раз медленно, по слогам.', 'Ответ прячется в тексте или на картинке. Найди нужное место пальцем.'];
   const INSTR = { choice: 'Прочитай вопрос. Потом нажми на один ответ из кнопок ниже.', input: 'Посчитай и набери ответ на кнопках с цифрами. Потом нажми «Проверить».',
@@ -52,7 +54,11 @@
   let voices = [];
   const loadVoices = () => { try { voices = speechSynthesis.getVoices(); } catch (e) { voices = []; } };
   if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+  let VOICE = {}, AUD = null; // текст → mp3 с красивым голосом (только тексты чтения, остальное голос браузера)
   function speak(text, lang) {
+    if (AUD) { AUD.pause(); AUD = null; }
+    const vf = VOICE[String(text)];
+    if (vf) { if (window.speechSynthesis) speechSynthesis.cancel(); AUD = new Audio(src(vf)); AUD.play().catch(() => {}); if (P && P.ts && P.ts.wrongs > 0) P.ts.listenedAfterWrong = true; return; }
     if (!('speechSynthesis' in window)) return;
     const l = lang === 'en' ? 'en' : 'ru';
     speechSynthesis.cancel();
@@ -151,6 +157,7 @@
     const skills = program.skills;
     const skillById = Object.fromEntries(skills.map((s) => [s.id, s]));
     const wordById = Object.fromEntries(words.words.map((w) => [w.id, w]));
+    VOICE = {}; for (const l of lessons) for (const t of l.steps) if (t.voice && t.text) VOICE[t.text] = t.voice;
     return { program, tracks: program.tracks, worlds: program.worlds, skills, skillById, lessons, words: words.words, wordById, errors, modes, calendar: calendar.days,
       config: (BUNDLE && BUNDLE.files['config.json']) || {}, worldsData, readwords, catalog, week, lines: lines.events, roadmap, tutorCfg: tutor, curricula };
   }
@@ -161,9 +168,11 @@
   const sk = (id) => (S.skills[id] = S.skills[id] || { lvl: 0, box: 0, due: '' });
   const lvl = (id) => { const s = S.skills[id]; if (s && s.manual != null) return s.manual; return mastery(id).lvl; };
   const skillOpen = (s) => S.parent.unlockAll || s.deps.every((d) => lvl(d) >= 3);
-  const lessonsOf = (sid) => C.lessons.filter((l) => l.skill === sid);
+  const lessonsOf = (sid) => C.lessons.filter((l) => l.skill === sid && !l.book); // книга героев идёт своим порядком
+  const bookLessons = () => C.lessons.filter((l) => l.book).sort((a, b) => a.book - b.book);
   const isDone = (l) => !!(S.lessons[l.id] && S.lessons[l.id].done);
   function lessonOpen(l) {
+    if (l.book) return true;
     const s = skillOf(l);
     if (!s || !skillOpen(s)) return false;
     if (l.repeat || S.parent.unlockAll) return true;
@@ -177,12 +186,12 @@
     return miss.length ? 'Откроется после: ' + miss.join(', ') : 'Сначала предыдущий урок';
   };
   function nextInTrack(tid) {
-    const ls = C.lessons.filter((l) => skillOf(l).track === tid && !l.control);
+    const ls = C.lessons.filter((l) => skillOf(l).track === tid && !l.control && !l.book);
     return ls.find((l) => !l.repeat && lessonOpen(l) && !isDone(l)) || ls.find((l) => l.repeat && lessonOpen(l)) || null;
   }
   function mainPick() {
     const pref = ['reading', 'math', 'reading', 'math', 'reading', 'words', 'math'][new Date().getDay()];
-    const cand = C.lessons.filter((l) => !l.repeat && !l.control && lessonOpen(l) && !isDone(l) && ['reading', 'math', 'words'].includes(skillOf(l).track));
+    const cand = C.lessons.filter((l) => !l.repeat && !l.control && !l.book && lessonOpen(l) && !isDone(l) && ['reading', 'math', 'words'].includes(skillOf(l).track));
     cand.sort((a, b) => (PRIO[skillOf(a).priority] - PRIO[skillOf(b).priority]) ||
       ((skillOf(a).track === pref ? 0 : 1) - (skillOf(b).track === pref ? 0 : 1)) || (C.lessons.indexOf(a) - C.lessons.indexOf(b)));
     return cand[0] || null;
@@ -418,7 +427,7 @@
     const ss = C.skills.filter((s) => s.track === tid && skillOpen(s)).sort((a, b) => PRIO[a.priority] - PRIO[b.priority]);
     for (const s of ss.filter((x) => weekFocus().includes(x.id))) { const st = continueSkill(s, used, 'фокус недели'); if (st) return st; }
     for (const s of ss) { const m = mastery(s.id); if (m.n && m.lvl < 3) { const st = continueSkill(s, used); if (st) return st; } }
-    const mastered = C.lessons.filter((x) => !x.repeat && !x.control && skillOf(x).track === tid && lessonOpen(x) && !isDone(x) && lvl(skillOf(x).id) >= 4);
+    const mastered = C.lessons.filter((x) => !x.repeat && !x.control && !x.book && skillOf(x).track === tid && lessonOpen(x) && !isDone(x) && lvl(skillOf(x).id) >= 4);
     if (mastered.length) logAdapt(`Пропущены уроки: ${[...new Set(mastered.map((x) => skillOf(x).title))].join('; ')}`, 'эти навыки уже освоены самостоятельно, идём дальше');
     const l = C.lessons.find((x) => !x.repeat && !x.control && skillOf(x).track === tid && lessonOpen(x) && !isDone(x) && !used.has(x.id) && lvl(skillOf(x).id) < 4);
     if (l) { used.add(l.id); return { kind: 'lesson', lesson: l.id, title: l.title, track: tid, why: 'новая тема', done: false }; }
@@ -564,7 +573,7 @@
   // ---------- каркас экрана ----------
   function shell(active, inner) {
     const ic = (n) => window.ICONS[n];
-    const nav = [['today', ic('sun'), 'Сегодня'], ['map', ic('map-trifold'), 'Карта'], ['skills', ic('tree'), 'Навыки'], ['homework', ic('camera'), 'Домашка']];
+    const nav = [['today', ic('sun'), 'Сегодня'], ['book', ic('book-open-text'), 'Книга'], ['map', ic('map-trifold'), 'Карта'], ['skills', ic('tree'), 'Навыки'], ['homework', ic('camera'), 'Домашка']];
     return `<header class="top">
         <div class="brand">${Chars.html('nika', 'happy', 'sm')}<span>Учимся с Никой</span></div>
         <div class="grow"></div>
@@ -665,7 +674,7 @@
   function viewMap(tid) {
     tid = tid || 'reading';
     const t = track(tid);
-    const ls = C.lessons.filter((l) => skillOf(l).track === tid);
+    const ls = C.lessons.filter((l) => skillOf(l).track === tid && !l.book);
     const firstNext = ls.find((l) => lessonOpen(l) && !isDone(l));
     const decos = { reading: ['🌳', '🍄', '🦆'], math: ['🌻', '🐝', '🏡'], words: ['📜', '🖋️', '🕯️'], english: ['🎈', '⛵', '🏰'], logic: ['🧩', '🔺', '🟡'], create: ['🎨', '🖌️', '🌈'] }[tid] || ['⭐'];
     let h = `<h1>Карта</h1><div class="tabs">${C.tracks.map((x) => `<button data-tab="${x.id}" class="${x.id === tid ? 'on' : ''}">${TI[x.id] ? ic(TI[x.id]) : ''} ${esc(x.title)}</button>`).join('')}</div>`;
@@ -849,6 +858,9 @@
       body += `<div class="card wordcard"><div class="tag">Новое слово</div>${w.img ? `<img class="pic-img" src="${esc(src(w.img))}" alt="">` : `<div class="p">${esc(w.pic)}</div>`}
         <div class="w">${rich(w.word)} ${ts.audioOn ? sayBtn(w.word) : ''}</div><div class="d">${rich(w.simple)}</div>
         <div class="ex">${rich(w.example)} ${ts.audioOn ? sayBtn(w.example) : ''}</div></div>`;
+    } else if (t.type === 'comic') {
+      body += t.frames.map((f, k) => `<div class="frame" style="animation-delay:${k * 0.35}s">${f.img ? `<img class="hero-pic" src="${esc(src(f.img))}" alt="${esc(f.who)}">` : Chars.html('nika', 'happy')}
+        <div class="bubble"><div class="tag">${esc(f.who)}</div>${rich(f.text).replace(/\[\[(.+?)\]\]/g, '<span class="sign">$1</span>')}</div></div>`).join('');
     } else if (t.type === 'listen') {
       body += `<div class="tag">Послушай</div><div class="reading">${sayBtn(t.text, 'ru', 'say')}${rich(t.text)}</div>`;
     } else {
@@ -904,9 +916,12 @@
       body += `<div class="card" style="margin-top:16px"><div class="tag yellow">Что трудно?</div><div class="tiles">${opts.map(([k, e, txt]) => `<button class="tile" style="background:var(--sun-l)" data-help="${k}"><span class="e">${e}</span>${txt}</button>`).join('')}</div></div>`;
     }
 
+    // в книге героев рядом с заданием герой темы, в комиксе герои уже в кадрах
+    const stageChar = t.type === 'comic' ? '' : P.lesson.hero && !rc ? `<img class="hero-pic stage-hero" src="${esc(src(ts.solved && P.lesson.heroWin ? P.lesson.heroWin : P.lesson.hero))}" alt="">`
+      : Chars.html(rc ? rc.who : who, rc ? rc.mood : mood, ts.solved && !ts.wrongs ? 'jump' : '');
     let foot = '';
     const helpBtn = `<button class="btn yellow ${isCheckable(t) ? '' : 'small'}" data-act="helpmenu">${ic('lightbulb')} Мне трудно</button>`;
-    if (t.type === 'info' || t.type === 'word') foot = `${helpBtn}<button class="btn" data-act="next">Дальше</button>`;
+    if (t.type === 'info' || t.type === 'word' || t.type === 'comic') foot = `${helpBtn}<button class="btn" data-act="next">Дальше</button>`;
     else if (t.type === 'say') foot = `${helpBtn}<button class="btn green" data-act="next">${esc(t.done || 'Готово')}</button>`;
     else if (t.type === 'listen') foot = `<button class="btn green" data-act="next">Дослушала</button>`;
     else if (!ts.solved) {
@@ -918,7 +933,7 @@
     app.innerHTML = `<div class="ptop"><button class="iconbtn" data-act="exit" aria-label="Выйти">✕</button>
         <div class="bar"><i style="width:${pct}%"></i></div>
         <button class="iconbtn ${S.set.syll ? 'on' : ''}" data-act="syll">сло·ги</button></div>
-      <main class="player"><div class="stage">${Chars.html(rc ? rc.who : who, rc ? rc.mood : mood, ts.solved && !ts.wrongs ? 'jump' : '')}<div class="body">${body}</div></div>
+      <main class="player"><div class="stage">${stageChar}<div class="body">${body}</div></div>
       <div class="pfoot">${foot}</div></main>${feedback || ''}`;
     clearTimeout(idleTimer);
     if (isCheckable(t) && !ts.solved && !ts.menu && !ts.idleShown) idleTimer = setTimeout(() => { if (P && P.ts === ts && !ts.solved) { ts.idleShown = true; ts.react = react('idle'); renderPlayer(); } }, 90000);
@@ -960,7 +975,7 @@
   function solved() {
     const t = P.steps[P.i], ts = P.ts; ts.solved = true;
     P.results.push({ t: Date.now(), lesson: P.lesson.id, skill: P.mode === 'lesson' || P.mode === 'practice' ? P.lesson.skill : t.reviewSkill || null, word: t.wordRef || t.reviewWord || null, step: P.i,
-      wrongs: ts.wrongs, hints: ts.hints, revealed: ts.revealed, cond: ts.listenedAfterWrong, errs: ts.errs, review: P.mode === 'review', help: ts.help, audio: ts.audioOn,
+      wrongs: ts.wrongs, hints: ts.hints, revealed: ts.revealed, cond: ts.listenedAfterWrong, u: !!t.u, errs: ts.errs, review: P.mode === 'review', help: ts.help, audio: ts.audioOn,
       d: t.d || P.diff || 1, fmt: t.type, ms: Date.now() - (ts.t0 || Date.now()), gen: !!t.gen, ...readStat(t, ts) });
     const hardAlone = !ts.wrongs && !ts.hints && !ts.help.length && (t.d || P.diff || 1) >= 2;
     const rr = hardAlone ? react('hard_solved_alone') : ts.wrongs && !ts.hints && !ts.help.length ? react('fixed_after_error') : null;
@@ -988,6 +1003,7 @@
       if (P.mode === 'lesson') {
         const l = P.lesson, prev = S.lessons[l.id] || { times: 0 };
         S.lessons[l.id] = { done: true, at: today(), times: prev.times + 1, wrongs: P.wrongs, hints: P.hints };
+        if (l.book) S.lessons[l.id].bk = bookScore(r);
         for (const st of l.steps) if (st.type === 'words') for (const w of st.ids) if (!S.words[w]) S.words[w] = { box: 1, due: addDays(1) };
       }
       const after = lvl(id);
@@ -1023,6 +1039,7 @@
       if (location.hash === '#/today') route(); else location.hash = '#/today';
       return;
     }
+    if (P.lesson.book) { const bl = P.lesson; P = null; app.innerHTML = viewBookDone(bl); return; }
     const dy = day(), inDay = dy && dy.started && !dy.end && dy.steps;
     const nxt = P.mode === 'lesson' && !inDay ? nextInTrack(skillOf(P.lesson).track) : null;
     P = null;
@@ -1089,10 +1106,51 @@
     if (act === 'next') { nextStep(); return; }
     if (act === 'skip') {
       P.results.push({ t: Date.now(), lesson: P.lesson.id, skill: P.mode === 'lesson' ? P.lesson.skill : t.reviewSkill || null, step: P.i,
-        wrongs: ts.wrongs, hints: ts.hints, revealed: true, skipped: true, errs: ts.errs, help: ts.help, audio: ts.audioOn, d: t.d || P.diff || 1, fmt: t.type });
+        wrongs: ts.wrongs, hints: ts.hints, revealed: true, skipped: true, u: !!t.u, errs: ts.errs, help: ts.help, audio: ts.audioOn, d: t.d || P.diff || 1, fmt: t.type });
       nextStep(); return;
     }
     if (act === 'exit') { if (confirm('Выйти из урока? Прогресс этого урока не сохранится.')) { P = null; location.hash = '#/today'; } return; }
+  }
+
+  // ---------- книга героев: проверка 1 класса ----------
+  // ошибки «не поняла, что просят» (шаги с u) и «не знает правило» считаем отдельно; подсказка = ошибка, пропуск = 2
+  function bookScore(r) {
+    const b = { u: 0, r: 0, read: 0 };
+    for (const x of r) {
+      if (!x.info) b[x.u ? 'u' : 'r'] += (x.wrongs || 0) + (x.hints || 0) + (x.revealed || x.skipped ? 2 : 0);
+      if ((x.help || []).includes('reading')) b.read++;
+    }
+    return b;
+  }
+  function viewBook() {
+    const ls = bookLessons(), got = ls.filter(isDone).length, next = ls.find((l) => !isDone(l));
+    const pages = Array.from({ length: BOOK_PAGES }, (_, i) => { const l = ls.find((x) => x.book === i + 1), ok = l && isDone(l); return `<div class="bpage ${ok ? 'got' : ''}">${ok ? '⭐' : i + 1}</div>`; }).join('');
+    const hi = got ? `В книге уже ${got} ${plural(got, ['страница', 'страницы', 'страниц'])}. Герои ждут!`
+      : 'Беда! В моей волшебной книге перепутались страницы. Герои попали не в свои истории: Гарфилд в Париж, Леди Баг в Хогвартс. Каждое приключение возвращает одну страницу. Поможешь собрать книгу?';
+    return shell('book', `<div class="hello">${Chars.html('nika', 'happy')}<div class="bubble">${hi}</div></div>
+      <div class="heroes">${BOOK_HEROES.map((p) => `<img class="hero-pic" src="${esc(src(p))}" alt="">`).join('')}</div>
+      <div class="card"><h2>Книга героев: ${got} из ${BOOK_PAGES}</h2><div class="bpages">${pages}</div>
+      ${next ? `<div class="pfoot"><button class="btn green" data-go="#/lesson/${next.id}">${got ? 'Следующее приключение' : 'Начать приключение'}</button></div>` : '<p class="sub">Все готовые приключения пройдены. Скоро появятся новые страницы.</p>'}</div>`);
+  }
+  function viewBookDone(l) {
+    const got = bookLessons().filter(isDone).length;
+    const todayN = bookLessons().filter((x) => S.lessons[x.id] && S.lessons[x.id].at === today()).length;
+    return `<main class="player done-screen"><img class="hero-pic big" src="${esc(src(l.heroWin || l.hero))}" alt="">
+      <h1>Страница ${l.book} вернулась в книгу ⭐</h1><p class="sub">${esc(l.title)}: приключение пройдено. В книге ${got} из ${BOOK_PAGES}.</p>
+      ${todayN % 2 === 0 ? '<p class="sub">Перерыв 5 минут: попрыгай, попей воды. Потом можно дальше.</p>' : ''}
+      <div class="pfoot"><button class="btn" data-go="#/book">В книгу</button></div></main>`;
+  }
+  function viewParentBook() {
+    const mark = (b) => { const n = b.u + b.r; return n <= 1 ? '🟢 знает' : n <= 4 ? '🟡 путается' : '🔴 дыра'; };
+    const why = (b) => (b.u + b.r === 0 ? 'Без ошибок' : b.u > b.r ? 'Путается в том, что просят, а не в правиле' : b.r > b.u ? 'Ошибки в самом правиле' : 'Ошибки и в задании, и в правиле');
+    let h = `<h2>Книга героев: проверка 1 класса</h2><div class="card"><p class="muted small">Ошибки «не поняла, что просят» и «не знает правило» считаются отдельно. Подсказка считается как ошибка. Если тему проходили несколько раз, показан последний.</p>
+      <table class="ptable"><tr><th>Тема</th><th>Итог</th><th>Почему</th></tr>`;
+    for (const l of bookLessons()) {
+      const st = S.lessons[l.id], b = st && st.bk, name = `${l.book}. ${esc(l.subj)}: ${esc(l.title)}`;
+      h += b ? `<tr><td>${name}</td><td>${mark(b)}</td><td>${why(b)}<div class="muted small">в задании ${b.u}, в правиле ${b.r}${b.read ? `, просила прочитать ${b.read}` : ''} · ${fmtDay(st.at)}</div></td></tr>`
+        : `<tr><td>${name}</td><td class="muted">не проходила</td><td></td></tr>`;
+    }
+    return h + `</table><p class="muted small">Тем в книге сейчас ${bookLessons().length} из ${BOOK_PAGES}. Остальные добавит Claude.</p></div>`;
   }
 
   // ---------- родительский режим ----------
@@ -1328,11 +1386,11 @@
     flush();
     // добавки к вкладкам
     sec.tools = parentTools() + sec.tools;
-    const tabs = [['now', '🙋 Сегодня'], ['week', '📅 Неделя'], ['skills', '🌳 Навыки и программы'], ['tools', '🧰 Для Киры'], ['set', '⚙️ Настройки']];
+    const tabs = [['now', '🙋 Сегодня'], ['book', '📖 Книга героев'], ['week', '📅 Неделя'], ['skills', '🌳 Навыки и программы'], ['tools', '🧰 Для Киры'], ['set', '⚙️ Настройки']];
     const top = `<div class="row" style="justify-content:space-between"><h1>Кабинет мамы</h1><button class="btn soft small" data-go="#/path">🗺 Путь Киры</button></div>
       <p class="sub">${esc(S.name)} · миры: ${S.worlds.map((w) => (C.worlds.find((x) => x.id === w) || {}).title).filter(Boolean).join(', ') || 'не выбраны'}</p>
       <div class="tabs">${tabs.map(([k, t]) => `<button data-ptab="${k}" class="${ptab === k ? 'on' : ''}">${t}</button>`).join('')}</div>`;
-    const first = { now: viewParentSummary() + sec.now, week: viewParentWeek() + sec.week };
+    const first = { book: viewParentBook(), now: viewParentSummary() + sec.now, week: viewParentWeek() + sec.week };
     return shell('', top + (first[ptab] || sec[ptab]));
   }
 
@@ -1510,7 +1568,7 @@
     if (page === 'review') { startReview(); return; }
     if (page === 'practice') { startPractice(arg); return; }
     P = null;
-    const views = { path: viewPath, today: viewToday, nowant: viewNoWant, map: () => viewMap(arg), skills: viewSkills, homework: viewHomework, parent: viewParent };
+    const views = { path: viewPath, today: viewToday, nowant: viewNoWant, map: () => viewMap(arg), skills: viewSkills, homework: viewHomework, parent: viewParent, book: viewBook };
     app.innerHTML = (views[page] || viewToday)();
     window.scrollTo(0, 0);
     if (!views[page] || page === 'today') { const iv = setInterval(() => { if (!P) app.innerHTML = viewToday(); }, 60000); cleanup = () => clearInterval(iv); }
@@ -1640,7 +1698,7 @@
       if (e.key === 'Backspace') { onPlayerClick({ dataset: { key: 'del' } }); return; }
       if (e.key === 'Enter' && P.ts.input) { onPlayerClick({ dataset: { act: 'check' } }); return; }
     }
-    if (e.key === 'Enter' && (P.ts.solved || t.type === 'info' || t.type === 'word' || t.type === 'say')) { e.preventDefault(); nextStep(); }
+    if (e.key === 'Enter' && (P.ts.solved || ['info', 'word', 'say', 'comic'].includes(t.type))) { e.preventDefault(); nextStep(); }
   });
   window.addEventListener('hashchange', route);
   window.addEventListener('resize', () => { if (document.querySelector('.world')) drawPath(); });
