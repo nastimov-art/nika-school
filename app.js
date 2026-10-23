@@ -1122,6 +1122,8 @@
     }
     return b;
   }
+  // код для мамы: перенос результатов книги с чужого ноутбука (бабушка) по фото экрана. страница.задание.правило.чтение
+  const bookCode = () => bookLessons().filter((l) => S.lessons[l.id] && S.lessons[l.id].bk).map((l) => { const b = S.lessons[l.id].bk; return `${l.book}.${b.u}.${b.r}.${b.read}`; }).join(' ');
   function viewBook() {
     const ls = bookLessons(), got = ls.filter(isDone).length, next = ls.find((l) => !isDone(l));
     const pages = Array.from({ length: BOOK_PAGES }, (_, i) => { const l = ls.find((x) => x.book === i + 1), ok = l && isDone(l); return `<div class="bpage ${ok ? 'got' : ''}">${ok ? '⭐' : i + 1}</div>`; }).join('');
@@ -1130,7 +1132,8 @@
     return shell('book', `<div class="hello">${Chars.html('nika', 'happy')}<div class="bubble">${hi}</div></div>
       <div class="heroes">${BOOK_HEROES.map((p) => `<img class="hero-pic" src="${esc(src(p))}" alt="">`).join('')}</div>
       <div class="card"><h2>Книга героев: ${got} из ${BOOK_PAGES}</h2><div class="bpages">${pages}</div>
-      ${next ? `<div class="pfoot"><button class="btn green" data-go="#/lesson/${next.id}">${got ? 'Следующее приключение' : 'Начать приключение'}</button></div>` : '<p class="sub">Все готовые приключения пройдены. Скоро появятся новые страницы.</p>'}</div>`);
+      ${next ? `<div class="pfoot"><button class="btn green" data-go="#/lesson/${next.id}">${got ? 'Следующее приключение' : 'Начать приключение'}</button></div>` : '<p class="sub">Все готовые приключения пройдены. Скоро появятся новые страницы.</p>'}</div>
+      ${got ? `<p class="muted small" style="text-align:center">Код для мамы: ${bookCode()}</p>` : ''}`);
   }
   function viewBookDone(l) {
     const got = bookLessons().filter(isDone).length;
@@ -1150,7 +1153,9 @@
       h += b ? `<tr><td>${name}</td><td>${mark(b)}</td><td>${why(b)}<div class="muted small">в задании ${b.u}, в правиле ${b.r}${b.read ? `, просила прочитать ${b.read}` : ''} · ${fmtDay(st.at)}</div></td></tr>`
         : `<tr><td>${name}</td><td class="muted">не проходила</td><td></td></tr>`;
     }
-    return h + `</table><p class="muted small">Тем в книге сейчас ${bookLessons().length} из ${BOOK_PAGES}. Остальные добавит Claude.</p></div>`;
+    return h + `</table><p class="muted small">Тем в книге сейчас ${bookLessons().length} из ${BOOK_PAGES}. Остальные добавит Claude.</p></div>
+      <h2>Кира занималась на другом ноутбуке?</h2><div class="card"><p class="muted small">Внизу страницы «Книга» на том ноутбуке есть «Код для мамы». Перепишите его сюда: результаты добавятся к этим.</p>
+      <input class="field" id="bcode" placeholder="например 1.0.2.0 2.1.0.0" autocomplete="off"><div class="row" style="margin-top:10px"><button class="btn small" data-act="bookcode">Добавить результаты</button></div></div>`;
   }
 
   // ---------- родительский режим ----------
@@ -1633,6 +1638,15 @@
     if (act === 'worlds') { S.worlds = pickedWorlds.slice(); save(); location.hash = '#/today'; return; }
     if (act === 'cam') { startCam(); return; }
     if (act === 'snap') { snap(); return; }
+    if (act === 'bookcode') {
+      let n = 0;
+      for (const [, bk, u, r, read] of document.getElementById('bcode').value.matchAll(/(\d+)\.(\d+)\.(\d+)\.(\d+)/g)) {
+        const l = bookLessons().find((x) => x.book === +bk); if (!l) continue;
+        const prev = S.lessons[l.id] || { times: 0 };
+        S.lessons[l.id] = Object.assign(prev, { done: true, at: prev.at || today(), times: prev.times + 1, bk: { u: +u, r: +r, read: +read } }); n++;
+      }
+      save(); alert(n ? `Добавлено тем: ${n}` : 'Не нашла код. Он выглядит так: 1.0.2.0 2.1.0.0'); app.innerHTML = viewParent(); return;
+    }
     if (act === 'savecomment') { S.parent.comment = document.getElementById('pcomment').value.trim(); save(); el.textContent = 'Сохранено ✓'; return; }
     if (act === 'clearcomment') { S.parent.comment = ''; save(); route(); return; }
     if (act === 'savenotes') { S.parent.notes = document.getElementById('pnotes').value; save(); el.textContent = 'Сохранено ✓'; return; }
