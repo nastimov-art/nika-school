@@ -1,4 +1,4 @@
-// Учимся с Никой: самоучитель. Контент живёт в content/*.json, здесь только движок.
+// Кирина школа (бывш. «Учимся с Никой»): самоучитель. Контент живёт в content/*.json, здесь только движок.
 (() => {
   'use strict';
   const KEY = 'nika-school-v1';
@@ -587,9 +587,9 @@
   // ---------- каркас экрана ----------
   function shell(active, inner) {
     const ic = (n) => window.ICONS[n];
-    const nav = [['book', ic('book-open-text'), 'Книга'], ['today', ic('sun'), 'Сегодня'], ['map', ic('map-trifold'), 'Карта'], ['skills', ic('tree'), 'Навыки'], ['homework', ic('camera'), 'Домашка'], ['clay', ic('paint-brush'), 'Лепка']];
+    const nav = [['today', ic('sun'), 'Сегодня'], ['book', ic('book-open-text'), 'Книги'], ['clay', ic('paint-brush'), 'Творчество']]; // карта и навыки теперь в кабинете мамы
     return `<header class="top">
-        <div class="brand">${Chars.html('nika', 'happy', 'sm')}<span>Учимся с Никой</span></div>
+        <div class="brand">${Chars.html('nika', 'happy', 'sm')}<span>Кирина школа</span></div>
         <div class="grow"></div>
         <button class="iconbtn ${S.set.syll ? 'on' : ''}" data-act="syll" title="Показывать слоги цветом">сло·ги</button>
         <a class="iconbtn ghost" href="#/parent" title="Для мамы" aria-label="Для мамы"><span class="ic">${ic('gear')}</span></a>
@@ -1140,13 +1140,25 @@
   const bookCode = () => bookLessons().filter((l) => S.lessons[l.id] && S.lessons[l.id].bk).map((l) => { const b = S.lessons[l.id].bk; return `${l.book}.${b.u}.${b.r}.${b.read}`; }).join(' ');
   function viewBook() {
     const ls = bookLessons(), got = ls.filter(isDone).length, next = ls.find((l) => !isDone(l));
-    const pages = Array.from({ length: BOOK_PAGES }, (_, i) => { const l = ls.find((x) => x.book === i + 1), ok = l && isDone(l); return `<div class="bpage ${ok ? 'got' : ''}">${ok ? '⭐' : i + 1}</div>`; }).join('');
-    const hi = got ? `В книге уже ${got} ${plural(got, ['страница', 'страницы', 'страниц'])}. Герои ждут!`
-      : 'Беда! В моей волшебной книге перепутались страницы. Герои попали не в свои истории: Гарфилд в Париж, Леди Баг в Хогвартс. Каждое приключение возвращает одну страницу. Поможешь собрать книгу?';
+    const stars = (l) => { const b = S.lessons[l.id] && S.lessons[l.id].bk; if (!b) return '⭐'; const n = b.u + b.r; return n <= 1 ? '⭐⭐⭐' : n <= 4 ? '⭐⭐' : '⭐'; };
+    const X = [22, 62, 78, 45]; // зигзаг тропинки, % ширины
+    const shown = Math.min(BOOK_PAGES, (next ? next.book : BOOK_PAGES) + 3); // дальше трёх замков не показываем
+    const pts = Array.from({ length: shown }, (_, i) => [X[i % 4], i * 96 + 48]);
+    const line = `<svg class="trail" viewBox="0 0 100 ${shown * 96}" preserveAspectRatio="none"><path d="M${pts.map((p) => p.join(' ')).join(' L')}" vector-effect="non-scaling-stroke"/></svg>`;
+    const nodes = pts.map(([x, y], i) => {
+      const l = ls.find((q) => q.book === i + 1), ok = l && isDone(l), now = l && l === next;
+      const inner = ok ? `${i + 1}<span class="st">${stars(l)}</span>` : now ? i + 1 : '🔒';
+      return `<button class="node ${ok ? 'got' : now ? 'now' : 'lock'}" style="left:${x}%;top:${y}px" ${ok || now ? `data-go="#/lesson/${l.id}"` : 'disabled'} aria-label="Страница ${i + 1}">${inner}</button>`;
+    }).join('');
+    const hi = got ? `Уже ${got} ${plural(got, ['страница', 'страницы', 'страниц'])}. Герои ждут!`
+      : 'Беда! В моей волшебной книге перепутались страницы. Герои попали не в свои истории. Каждое приключение возвращает одну страницу. Поможешь?';
     return shell('book', `<div class="hello">${Chars.html('nika', 'happy')}<div class="bubble">${hi}</div></div>
-      <div class="heroes">${BOOK_HEROES.map((p) => `<img class="hero-pic" src="${esc(src(p))}" alt="">`).join('')}</div>
-      <div class="card"><h2>Книга героев: ${got} из ${BOOK_PAGES}</h2><div class="bpages">${pages}</div>
-      ${next ? `<div class="pfoot"><button class="btn green" data-go="#/lesson/${next.id}">${got ? 'Следующее приключение' : 'Начать приключение'}</button></div>` : '<p class="sub">Все готовые приключения пройдены. Скоро появятся новые страницы.</p>'}</div>
+      <div class="card"><h2>Книга героев</h2><p class="sub">Собрано ${got} из ${BOOK_PAGES}</p>
+      <div class="heroes">${BOOK_HEROES.map((p) => `<span class="hero-dot"><img src="${esc(src(p))}" alt=""></span>`).join('')}<span class="hero-dot lock" title="Хантрикс">🎤</span></div>
+      <p class="muted small">Соберёшь всю книгу, и придут Хантрикс 🔒</p>
+      ${next ? `<div class="pfoot"><button class="btn green" data-go="#/lesson/${next.id}">${got ? 'Следующее приключение' : 'Начать приключение'}</button></div>` : '<p class="sub">Все приключения пройдены!</p>'}</div>
+      <div class="trailbox" style="height:${shown * 96}px">${line}${nodes}</div>
+      ${shown < BOOK_PAGES ? `<p class="muted small" style="text-align:center">Дальше ещё ${BOOK_PAGES - shown} ${plural(BOOK_PAGES - shown, ['страница', 'страницы', 'страниц'])}</p>` : ''}
       ${got ? `<p class="muted small" style="text-align:center">Код для мамы: ${bookCode()}</p>` : ''}`);
   }
   function viewClay() {
@@ -1587,10 +1599,9 @@
     if (cleanup) { cleanup(); cleanup = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
     const [, page, arg] = (location.hash || '#/book').split('/'); // на каникулах первый экран книга героев
-    if (!S.name || !S.worlds.length) {
-      if (page !== 'onboarding') { location.hash = '#/onboarding/' + (S.name ? 2 : 1); return; }
-      app.innerHTML = viewOnboarding(+arg); return;
-    }
+    // ponytail: сайт только для Киры, имя и миры не спрашиваем (решение 23.10)
+    if (!S.name || !S.worlds.length) { S.name = S.name || 'Кира'; if (!S.worlds.length) S.worlds = C.worlds.map((w) => w.id); save(); }
+    if (page === 'onboarding') { location.hash = '#/book'; return; }
     if (page !== 'parent' && page !== 'path') parentOk = false;
     if (page === 'lesson') { startLesson(arg); return; }
     if (page === 'review') { startReview(); return; }
@@ -1706,7 +1717,7 @@
     }
     if (act === 'forgetkey') { localStorage.removeItem(KEYSTORE); location.reload(); return; }
     if (act === 'newpin') { S.parent.pin = ''; save(); parentOk = false; route(); return; }
-    if (act === 'reset') { if (confirm('Стереть весь прогресс? Сначала лучше выгрузить его.')) { localStorage.removeItem(KEY); S = blankState(); parentOk = false; location.hash = '#/onboarding/1'; } return; }
+    if (act === 'reset') { if (confirm('Стереть весь прогресс? Сначала лучше выгрузить его.')) { localStorage.removeItem(KEY); S = blankState(); parentOk = false; location.hash = '#/book'; } return; }
   });
   app.addEventListener('change', (e) => {
     const el = e.target;

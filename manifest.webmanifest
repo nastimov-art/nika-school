@@ -1,6 +1,6 @@
 {
-  "name": "Учимся с Никой",
-  "short_name": "Ника",
+  "name": "Кирина школа",
+  "short_name": "Кирина школа",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
