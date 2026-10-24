@@ -70,10 +70,10 @@
     return a(60, 156, 25) + a(140, 156, -25);
   }
   function nika(m) {
-    const B = '#FFF1E2', SH = '#F5D9BE', IN = '#FFB3C7', ST = '#C9B8FF';
+    const B = '#FFC79E', SH = '#F2A876', IN = '#FF9EB8', ST = '#E98E5A'; // персиковый, чтобы читался на белом фоне (24.10)
     return `<svg viewBox="0 0 200 200" aria-hidden="true"><ellipse cx="100" cy="193" rx="52" ry="7" fill="rgba(60,40,160,.12)"/>
       <path class="tail" d="M138 172 C176 170 178 128 160 112" stroke="${SH}" stroke-width="15" fill="none" stroke-linecap="round"/>
-      <ellipse cx="100" cy="158" rx="45" ry="36" fill="${B}"/><ellipse cx="100" cy="166" rx="27" ry="22" fill="#fff"/>
+      <ellipse cx="100" cy="158" rx="45" ry="36" fill="${B}"/><ellipse cx="100" cy="166" rx="27" ry="22" fill="#FFF3E6"/>
       <ellipse cx="80" cy="190" rx="15" ry="8" fill="${SH}"/><ellipse cx="120" cy="190" rx="15" ry="8" fill="${SH}"/>
       ${kArms(m, SH)}
       <g class="head">

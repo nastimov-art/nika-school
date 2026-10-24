@@ -414,3 +414,7 @@ textarea.field { min-height: 110px; resize: vertical; font-weight: 600; }
 @keyframes beat { 50% { transform: scale(1.18); } }
 @keyframes floaty { 50% { transform: translateY(-6px); } }
 @media (prefers-reduced-motion: reduce) { .char-nika * { animation: none !important; } }
+/* белый фон (24.10): карточки и облачка отделяем рамкой и тенью */
+:root { --bg: #FFFFFF; --line: #ECE8F7; }
+.card, .bubble, .task-card, .iconbtn { border: 2px solid var(--line); }
+.card, .task-card { box-shadow: 0 6px 18px rgba(80, 60, 180, .08); }
