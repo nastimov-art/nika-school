@@ -1,4 +1,4 @@
-// Ника и Луна: простые круглые персонажи, эмоции только глазами и ртом (легко анимировать CSS).
+// Ника (котёнок) и Луна (лисичка): простые круглые персонажи, эмоции только глазами и ртом (легко анимировать CSS).
 // moods: happy, proud, wow, think, support
 (function () {
   const INK = '#2B2350';
@@ -34,22 +34,59 @@
   }
 
   // Ника: совёнок (выбрала Кира 08.10.2026). Настроение: глаза, брови, клюв.
-  function nika(mood) {
-    const beak = mood === 'wow' || mood === 'proud'
-      ? `<path d="M54 74 L66 74 L60 79Z" fill="#FFB547"/><path d="M55.5 79 L64.5 79 L60 85Z" fill="#F29B2E"/>`
-      : `<path d="M54 74 L66 74 L60 83Z" fill="#FFB547"/>`;
-    return `<svg viewBox="0 0 120 124" aria-hidden="true">
-      <ellipse cx="60" cy="117" rx="30" ry="5" fill="rgba(43,35,80,.10)"/>
-      <path d="M28 44 L24 14 L48 32Z" fill="#6B4FD8"/><path d="M92 44 L96 14 L72 32Z" fill="#6B4FD8"/>
-      <path d="M94 6 l2.6 5.4 5.9.8-4.3 4.1 1 5.8-5.2-2.8-5.2 2.8 1-5.8-4.3-4.1 5.9-.8z" fill="#FFC93C"/>
-      <ellipse cx="60" cy="72" rx="42" ry="41" fill="#7C5CFF"/>
-      <ellipse cx="60" cy="98" rx="24" ry="15" fill="#C9B8FF"/>
-      <path d="M50 96 l3 3 3-3 M58 102 l3 3 3-3 M66 96 l3 3 3-3" stroke="#8F74FF" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
-      <circle cx="44" cy="62" r="15" fill="#fff"/><circle cx="76" cy="62" r="15" fill="#fff"/>
-      ${brows(mood, 44, 76, 44)}
-      ${eyes(mood, 44, 76, mood === 'proud' ? 64 : 63, mood === 'proud' ? 8 : 5.6, 0)}
-      ${beak}
-      <ellipse cx="29" cy="80" rx="6" ry="3.5" fill="#FF8FB1" opacity=".75"/><ellipse cx="91" cy="80" rx="6" ry="3.5" fill="#FF8FB1" opacity=".75"/>
+  // Ника-котёнок (выбрана Настей 24.10 вместо совы, без звёздочки). Эмоции глазами, ртом, бровями и позой лап.
+  function kEyes(m, lx, rx, y, r) {
+    if (m === 'proud') return `<g class="eyes"><path d="M${lx - r} ${y + 3} Q${lx} ${y - r - 2} ${lx + r} ${y + 3}" stroke="${INK}" stroke-width="5" fill="none" stroke-linecap="round"/><path d="M${rx - r} ${y + 3} Q${rx} ${y - r - 2} ${rx + r} ${y + 3}" stroke="${INK}" stroke-width="5" fill="none" stroke-linecap="round"/></g>`;
+    const big = m === 'wow' ? 1.18 : 1, dx = m === 'think' ? 3 : 0, dy = m === 'think' ? -3 : 0;
+    const one = (x) => `<ellipse cx="${x + dx}" cy="${y + dy}" rx="${r * big}" ry="${r * 1.25 * big}" fill="${INK}"/><circle cx="${x + dx + r * 0.35}" cy="${y + dy - r * 0.45}" r="${r * 0.38}" fill="#fff"/><circle cx="${x + dx - r * 0.3}" cy="${y + dy + r * 0.45}" r="${r * 0.16}" fill="#fff"/>`;
+    return `<g class="eyes">${one(lx)}${one(rx)}</g>`;
+  }
+  function kMouth(m, cx, y) {
+    const s = `stroke="${INK}" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"`;
+    if (m === 'wow') return `<ellipse cx="${cx}" cy="${y + 5}" rx="6" ry="7.5" fill="${INK}"/><ellipse cx="${cx}" cy="${y + 8}" rx="3.5" ry="3" fill="#FF8FB1"/>`;
+    if (m === 'think') return `<path d="M${cx - 7} ${y + 5} Q${cx} ${y + 2} ${cx + 8} ${y + 4}" ${s}/>`;
+    if (m === 'support') return `<path d="M${cx - 9} ${y + 2} Q${cx - 4.5} ${y + 8} ${cx} ${y + 2} Q${cx + 4.5} ${y + 8} ${cx + 9} ${y + 2}" ${s}/>`;
+    return `<path d="M${cx - 11} ${y} Q${cx} ${y + 16} ${cx + 11} ${y} Z" fill="${INK}"/><path d="M${cx - 6} ${y + 8} Q${cx} ${y + 13} ${cx + 6} ${y + 8}" fill="#FF8FB1"/>`;
+  }
+  function kBrows(m, lx, rx, y) {
+    const s = `stroke="${INK}" stroke-width="3.5" stroke-linecap="round" fill="none"`;
+    if (m === 'support') return `<path d="M${lx - 8} ${y + 4} L${lx + 7} ${y}" ${s}/><path d="M${rx + 8} ${y + 4} L${rx - 7} ${y}" ${s}/>`;
+    if (m === 'wow') return `<path d="M${lx - 8} ${y - 3} Q${lx} ${y - 9} ${lx + 8} ${y - 3}" ${s}/><path d="M${rx - 8} ${y - 3} Q${rx} ${y - 9} ${rx + 8} ${y - 3}" ${s}/>`;
+    if (m === 'think') return `<path d="M${lx - 8} ${y} L${lx + 7} ${y - 2}" ${s}/><path d="M${rx - 7} ${y - 6} Q${rx} ${y - 10} ${rx + 8} ${y - 5}" ${s}/>`;
+    return '';
+  }
+  function kExtras(m) {
+    if (m === 'wow') return `<path class="spark" d="M28 52 l4 10 10 4 -10 4 -4 10 -4 -10 -10 -4 10 -4z" fill="#FFC64A"/><path class="spark" d="M170 40 l3 7 7 3 -7 3 -3 7 -3 -7 -7 -3 7 -3z" fill="#FF8FB1"/><path class="spark" d="M178 104 l3 7 7 3 -7 3 -3 7 -3 -7 -7 -3 7 -3z" fill="#7B61FF"/>`;
+    if (m === 'proud') return `<g class="floaty"><path d="M24 40 l5 11 12 2 -9 8 2 12 -10 -6 -10 6 2 -12 -9 -8 12 -2z" fill="#FFC64A"/><path d="M168 30 l4 8 9 1 -7 6 2 9 -8 -5 -8 5 2 -9 -7 -6 9 -1z" fill="#FFC64A"/></g>`;
+    if (m === 'think') return `<g class="floaty"><circle cx="170" cy="44" r="20" fill="#fff" stroke="#E2DCFB" stroke-width="3"/><text x="170" y="53" font-family="Nunito, sans-serif" font-weight="900" font-size="26" text-anchor="middle" fill="#7B61FF">?</text><circle cx="150" cy="70" r="5" fill="#fff" stroke="#E2DCFB" stroke-width="2"/></g>`;
+    if (m === 'support') return `<path class="heart" d="M170 58 c-6 -10 -20 -6 -18 5 c2 9 18 18 18 18 s16 -9 18 -18 c2 -11 -12 -15 -18 -5z" fill="#FF6B8B"/>`;
+    return '';
+  }
+  function kArms(m, col) {
+    const a = (x, y, rot) => `<ellipse cx="${x}" cy="${y}" rx="11" ry="17" fill="${col}" transform="rotate(${rot} ${x} ${y})"/>`;
+    if (m === 'happy' || m === 'proud') return a(54, 134, 40) + a(146, 134, -40);
+    if (m === 'support') return a(70, 158, -50) + a(130, 158, 50);
+    if (m === 'think') return a(60, 156, 20) + a(126, 130, -150);
+    return a(60, 156, 25) + a(140, 156, -25);
+  }
+  function nika(m) {
+    const B = '#FFF1E2', SH = '#F5D9BE', IN = '#FFB3C7', ST = '#C9B8FF';
+    return `<svg viewBox="0 0 200 200" aria-hidden="true"><ellipse cx="100" cy="193" rx="52" ry="7" fill="rgba(60,40,160,.12)"/>
+      <path class="tail" d="M138 172 C176 170 178 128 160 112" stroke="${SH}" stroke-width="15" fill="none" stroke-linecap="round"/>
+      <ellipse cx="100" cy="158" rx="45" ry="36" fill="${B}"/><ellipse cx="100" cy="166" rx="27" ry="22" fill="#fff"/>
+      <ellipse cx="80" cy="190" rx="15" ry="8" fill="${SH}"/><ellipse cx="120" cy="190" rx="15" ry="8" fill="${SH}"/>
+      ${kArms(m, SH)}
+      <g class="head">
+        <g class="ear-l"><path d="M50 74 L44 24 L88 50 Z" fill="${B}" stroke="${B}" stroke-width="10" stroke-linejoin="round"/><path d="M55 64 L52 36 L76 52 Z" fill="${IN}" stroke="${IN}" stroke-width="4" stroke-linejoin="round"/></g>
+        <g class="ear-r"><path d="M150 74 L156 24 L112 50 Z" fill="${B}" stroke="${B}" stroke-width="10" stroke-linejoin="round"/><path d="M145 64 L148 36 L124 52 Z" fill="${IN}" stroke="${IN}" stroke-width="4" stroke-linejoin="round"/></g>
+        <ellipse cx="100" cy="94" rx="62" ry="52" fill="${B}"/>
+        <path d="M90 46 Q92 56 90 62 M100 44 L100 60 M110 46 Q108 56 110 62" stroke="${ST}" stroke-width="5" stroke-linecap="round" fill="none"/>
+        <ellipse cx="66" cy="112" rx="11" ry="7" fill="${IN}" opacity=".7"/><ellipse cx="134" cy="112" rx="11" ry="7" fill="${IN}" opacity=".7"/>
+        ${kBrows(m, 77, 123, 78)}${kEyes(m, 77, 123, 96, 10)}
+        <path d="M96 107 h8 l-4 5z" fill="#FF8FB1" stroke="#FF8FB1" stroke-width="3" stroke-linejoin="round"/>
+        ${kMouth(m, 100, m === 'support' ? 111 : 113)}
+        <path d="M44 104 L22 100 M44 112 L24 116 M156 104 L178 100 M156 112 L176 116" stroke="${SH}" stroke-width="3" stroke-linecap="round"/>
+      </g>${kExtras(m)}
     </svg>`;
   }
 
