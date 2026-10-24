@@ -6,6 +6,7 @@
   const LV = ['🔒', '🌱', '🌿', '🌳', '⭐', '🚀']; // текстовые места (кабинет мамы, отчёты)
   const ic = (n) => `<span class="ic">${window.ICONS[n] || ''}</span>`;
   const LVI = ['lock', 'plant', 'leaf', 'tree', 'star', 'rocket-launch'].map(ic); // экраны Киры
+  const OPTC = { book: '#7B61FF', reading: '#7B61FF', math: '#2FA86A', russian: '#E8588C', english: '#3D8FE0', world: '#2A9D84', logic: '#E8902A', words: '#F07A35', review: '#8E7CF0', create: '#B65FD6', feelings: '#E8902A' }; // яркие цвета карточек выбора (белый текст)
   const TI = { review: 'repeat', break: 'person-simple-run', explore: 'binoculars', code: 'robot', music: 'music-notes', feelings: 'heart', reading: 'book-open-text', math: 'calculator', russian: 'pencil-simple-line', words: 'text-aa', english: 'headphones', world: 'globe-hemisphere-west', logic: 'puzzle-piece', create: 'paint-brush', homework: 'camera' };
   const LVT = ['пока закрыто', 'начала', 'учусь', 'получается', 'освоила', 'готова дальше'];
   const BOX_DAYS = [0, 1, 3, 7, 21]; // коробки повторения: завтра, 3 дня, неделя, 3 недели
@@ -443,17 +444,20 @@
     for (const s of ss) { const m = mastery(s.id); if (m.n && m.lvl < 3) { const st = continueSkill(s, used); if (st) return st; } }
     const mastered = C.lessons.filter((x) => !x.repeat && !x.control && !x.book && skillOf(x).track === tid && lessonOpen(x) && !isDone(x) && lvl(skillOf(x).id) >= 4);
     if (mastered.length) logAdapt(`Пропущены уроки: ${[...new Set(mastered.map((x) => skillOf(x).title))].join('; ')}`, 'эти навыки уже освоены самостоятельно, идём дальше');
-    const l = C.lessons.find((x) => !x.repeat && !x.control && skillOf(x).track === tid && lessonOpen(x) && !isDone(x) && !used.has(x.id) && lvl(skillOf(x).id) < 4);
+    const l = C.lessons.find((x) => !x.repeat && !x.control && !x.book && skillOf(x).track === tid && lessonOpen(x) && !isDone(x) && !used.has(x.id) && lvl(skillOf(x).id) < 4);
     if (l) { used.add(l.id); return { kind: 'lesson', lesson: l.id, title: l.title, track: tid, why: 'новая тема', done: false }; }
     const weak = ss.filter((s) => GEN[s.id] && !used.has('p:' + s.id)).sort((a, b) => lvl(a.id) - lvl(b.id))[0];
     if (weak) { used.add('p:' + weak.id); return { kind: 'practice', skill: weak.id, title: 'Тренировка: ' + weak.title, track: tid, why: 'всё пройдено, держим форму', done: false }; }
-    const rep = C.lessons.find((x) => x.repeat && !x.control && skillOf(x).track === tid && lessonOpen(x) && !used.has(x.id));
+    const rep = C.lessons.find((x) => x.repeat && !x.control && !x.book && skillOf(x).track === tid && lessonOpen(x) && !used.has(x.id));
     if (rep) { used.add(rep.id); return { kind: 'lesson', lesson: rep.id, title: rep.title, track: tid, why: 'задание, которое можно делать много раз', done: false }; }
     return null;
   }
   function buildDay(mode, energy) {
     const steps = [], used = new Set(), missing = [], notes = [];
     const push = (st) => { if (st) steps.push(st); return !!st; };
+    const lots = energy === 'lots'; if (lots) energy = 'ok'; // «много сил» = обычный план + ещё один шаг
+    // домашка первой, только в школьный день и только на ноутбуке Киры (там настроен ИИ-помощник)
+    if (mode === 'school' && S.set.tutor) steps.push({ kind: 'homework', title: 'Домашка', track: 'homework', done: false });
     if (dueSkills().length || dueWords().length) steps.push({ kind: 'review', title: 'Вспомним', track: 'review', why: 'подошёл срок повторения', done: false });
     // контрольная история раз в две недели: сравниваем динамику (а не оцениваем)
     const ctlList = C.lessons.filter((l) => l.control);
@@ -477,6 +481,7 @@
     for (const slot of plan) {
       if (slot === 'break' || slot === 'move') { if (steps.length && steps[steps.length - 1].kind !== 'break') steps.push({ kind: 'break', title: 'Разминка', track: 'break', move: pick(C.modes.moves || ['Встань, потянись, попей воды']), done: false }); continue; }
       if (slot === 'main') { pref.some((t) => push(stepFor(t, used))); continue; }
+      if (slot === 'book') { const bl = bookLessons().find((l) => !isDone(l)); if (bl) { used.add(bl.id); steps.push({ kind: 'lesson', lesson: bl.id, title: bl.title, track: 'book', done: false }); } continue; }
       const tid = slot === 'rotate' ? C.modes.rotate[Math.floor(Date.now() / 6048e5) % C.modes.rotate.length] : slot;
       if (!push(stepFor(tid, used))) missing.push(track(tid).title);
     }
@@ -490,6 +495,7 @@
     if (lf.delta < 0 && real().length > 2) { const last = real().pop(); steps.splice(steps.lastIndexOf(last), 1); while (steps.length && steps[steps.length - 1].kind === 'break') steps.pop(); logAdapt('Нагрузка снижена на 1 шаг', lf.why); notes.push('нагрузка снижена'); }
     if (lf.delta > 0 && mode !== 'full' && energy === 'ok') { const add = stepFor(pref[0], used) || stepFor('logic', used); if (add) { add.why = 'добавлен 1 шаг: ' + lf.why; steps.push(add); logAdapt('Нагрузка увеличена на 1 шаг', lf.why); } }
     steps.filter((x) => x.why && /трудно|часто|база|интересно|условие|фокус|добавлен|две недели/.test(x.why)).forEach((x) => logAdapt(`${x.title}`, x.why));
+    if (lots) { const add = stepFor(pref[1], used) || stepFor('logic', used); if (add) steps.push({ kind: 'break', title: 'Разминка', track: 'break', move: pick(C.modes.moves || ['Встань, потянись, попей воды']), done: false }, add); }
     if (energy === 'meh' || tiredDays >= 2) { notes.push(energy === 'meh' ? 'так себе: без лишнего' : 'устала два дня подряд: объём меньше'); return { steps: steps.filter((x) => x.kind !== 'break').slice(0, 2), missing, notes }; }
     return { steps, missing, notes };
   }
@@ -616,32 +622,17 @@
       <div class="bubble">${tag ? `<div class="tag">${esc(tag)}</div>` : ''}<div>${text}</div></div></div>`;
     const momNote = S.parent.comment ? `<div class="card" style="margin-bottom:16px"><div class="tag yellow">Записка от мамы</div><div>${rich(S.parent.comment)}</div></div>` : '';
 
-    // выходной и день отдыха: ничего обязательного
-    if (mode === 'off' || mode === 'weekend') {
-      let h = chip + bubble('nika', 'happy', `Привет, ${esc(S.name)}! ${esc(M.about)}`) + momNote;
-      h += '<h2>Если хочется</h2><div class="tiles">';
-      for (const [tid, e, t] of [['create', ic('paint-brush'), 'Создать'], ['book', ic('books'), 'Моя книга'], ['english', ic('headphones'), 'English'], ['logic', ic('puzzle-piece'), 'Загадка'], ['story', ic('ear'), 'Послушать историю']]) {
-        h += `<button class="tile" style="background:${track(tid === 'book' || tid === 'story' ? 'reading' : tid).color}" data-tile="${tid}"><span class="e">${e}</span>${t}</button>`;
-      }
-      return shell('today', h + '</div>' + (momLinks() ? `<h2>От мамы</h2><div class="cards">${momLinks()}</div>` : ''));
-    }
+    // день отдыха (например день рождения): ничего не предлагаем
+    if (mode === 'off') return shell('today', chip + bubble('nika', 'happy', `Привет, ${esc(S.name)}! ${esc(M.about)}`) + momNote + (momLinks() ? `<h2>От мамы</h2><div class="cards">${momLinks()}</div>` : ''));
 
-    // ещё не начали
-    if (!dy || !dy.started) {
-      return shell('today', `${chip}${bubble('nika', 'happy', `Привет, ${esc(S.name)}! ${esc(M.about)} Когда будешь готова, начинай рабочее время.`)}${momNote}
-        <div class="card" style="text-align:center;padding:30px"><button class="btn green" style="font-size:26px;min-height:84px;padding:20px 40px" data-act="startday">▶ Начинаем рабочее время</button>
-        <p class="sub" style="margin-top:16px">${M.minutes} минут. Ника, Луна и мама тоже работают.</p></div>
+    // начало дня: один вопрос, ответ сразу запускает день (без лишней кнопки «начать»)
+    if (!dy || !dy.energy) {
+      return shell('today', `${chip}${bubble('nika', 'happy', `Привет, ${esc(S.name)}! Как ты сегодня?`)}${momNote}
+        <div class="moods">
+          <button class="mood" data-energy="tired"><span class="e">😴</span>Мало сил</button>
+          <button class="mood" data-energy="ok"><span class="e">🙂</span>Нормально</button>
+          <button class="mood" data-energy="lots"><span class="e">🤩</span>Много сил</button></div>
         <div class="pfoot"><button class="btn soft small" data-go="#/nowant">Сегодня не хочу</button></div>`);
-    }
-
-    // самочувствие
-    if (!dy.energy) {
-      const hi = dy.by === 'kira' ? 'Ты начала сама. Это и есть рабочее время.' : 'Рабочее время началось.';
-      return shell('today', `${chip}${bubble('nika', 'proud', `${hi} Как ты сейчас?`)}
-        <div class="tiles" style="max-width:640px">
-          <button class="tile" style="background:var(--green-l)" data-energy="ok"><span class="e">${ic('smiley')}</span>Бодрая</button>
-          <button class="tile" style="background:var(--sun-l)" data-energy="meh"><span class="e">${ic('smiley-meh')}</span>Так себе</button>
-          <button class="tile" style="background:var(--peach-l)" data-energy="tired"><span class="e">${ic('moon')}</span>Устала</button></div>`);
     }
 
     // конец дня
@@ -649,25 +640,33 @@
       const done = dy.steps.filter((x) => x.done && x.kind !== 'break').length;
       const extraBtns = !dy.extraLesson ? `<h2>Хочешь ещё одну?</h2><p class="sub">Только если правда хочется. Можно и закончить.</p><div class="tiles">
           ${[['reading', ic('book-open-text'), 'История'], ['math', ic('calculator'), 'Числа'], ['english', ic('headphones'), 'English'], ['logic', ic('puzzle-piece'), 'Загадка'], ['create', ic('paint-brush'), 'Создать']].map(([tid, e, t]) => `<button class="tile" style="background:${track(tid).color}" data-extra="${tid}"><span class="e">${e}</span>${t}</button>`).join('')}</div>` : '';
-      const text = dy.refused ? 'Сегодня был лёгкий день. Это тоже нормально. Завтра продолжим.' : dy.timeUp ? 'Время вышло. На сегодня достаточно, остальное доделаем завтра.' : `На сегодня всё. Ты сделала шагов: ${done}. Отлично поработали.`;
-      return shell('today', `${chip}<div class="done-screen"><div class="duo" style="justify-content:center">${Chars.html('nika', 'proud', 'jump')}${Chars.html('luna', 'happy', 'md jump')}</div>
-        <h1>На сегодня всё</h1><p class="sub" style="font-size:22px">${esc(text)}</p></div>${extraBtns}${momLinks() ? `<h2>От мамы</h2><div class="cards">${momLinks()}</div>` : ''}`);
+      const text = dy.refused ? 'Сегодня был лёгкий день. Это тоже нормально. Завтра продолжим.' : dy.timeUp ? 'Время вышло. На сегодня достаточно, остальное доделаем завтра.' : `Ты сделала: ${done} ${plural(done, ['дело', 'дела', 'дел'])}. Отлично поработали!`;
+      return shell('today', `${chip}<div class="done-screen"><div class="row" style="justify-content:center">${Chars.html('nika', 'proud', 'jump')}</div>
+        <h1>На сегодня всё ⭐</h1><p class="sub" style="font-size:22px">${esc(text)}</p></div>${extraBtns}${momLinks() ? `<h2>От мамы</h2><div class="cards">${momLinks()}</div>` : ''}`);
     }
 
-    // план дня
-    const nx = nextStepOf(dy);
-    const mins = activeMin(dy);
-    const icon = Object.fromEntries(Object.entries(TI).map(([k, v]) => [k, ic(v)]));
-    let list = dy.steps.map((x) => `<div class="skill" style="${x === nx ? 'outline:4px solid var(--violet)' : ''}"><div class="lv">${x.done ? ic('check-circle') : icon[x.track] || '•'}</div>
-      <div><div>${esc(x.title)}</div><div class="st">${x.done ? 'готово' : x === nx ? 'сейчас' : 'потом'}</div></div></div>`).join('');
-    let go = '';
-    if (nx) {
-      if (nx.kind === 'break') go = `<button class="btn green" data-act="breakdone">${ic('person-simple-run')} Сделала, дальше</button>`;
-      else go = `<button class="btn" data-act="nextstep">Дальше: ${esc(nx.title)}</button>`;
+    // план дня: полоска, список, выбор из двух
+    const real = dy.steps.filter((x) => x.kind !== 'break'), doneN = real.filter((x) => x.done).length;
+    const nx = nextStepOf(dy), left = real.filter((x) => !x.done);
+    const stepIcon = (x) => x.kind === 'homework' ? '📸' : x.kind === 'break' ? '🏃' : x.track === 'book' ? '📖' : ic(TI[x.track] || 'star');
+    const list = dy.steps.map((x) => `<div class="pstep ${x.done ? 'done' : x === nx ? 'now' : ''}"><span class="ic">${stepIcon(x)}</span><span>${esc(x.kind === 'break' ? 'Перерыв' : x.title)}</span>${x.done ? '<span class="ok">✓</span>' : ''}</div>`).join('');
+    const optCard = (x) => {
+      const l = x.lesson && C.lessons.find((q) => q.id === x.lesson), heroImg = l && l.hero ? `<img src="${esc(src(l.hero))}" alt="">` : `<span class="oi">${stepIcon(x)}</span>`;
+      const sub = x.track === 'book' ? `Книга героев, страница ${l.book}` : x.kind === 'review' ? 'вспоминаем старое' : track(x.track).title;
+      return `<button class="opt" style="background:${OPTC[x.track] || '#7B61FF'}" data-pick="${dy.steps.indexOf(x)}"><b>${esc(x.title)}</b><small>${esc(sub)}</small>${heroImg}</button>`;
+    };
+    let now = '';
+    if (nx && nx.kind === 'break') now = `${bubble('nika', 'happy', `Перерыв! ${esc((nx.move || 'Встань и потянись').replace(/[.!]?$/, '.'))} Потом попей воды.`)}<div class="pfoot"><button class="btn green" data-act="breakdone">${ic('person-simple-run')} Сделала, дальше</button></div>`;
+    else if (nx && nx.kind === 'homework') now = `<div class="card"><h2>📸 Сначала домашка</h2><p class="sub">Сделай школьное задание. Если трудно, сфотографируй его, я подскажу.</p>
+      <div class="row"><button class="btn soft" data-go="#/homework">Подсказка по фото</button><button class="btn green" data-act="hwdone">Домашка готова ✓</button></div></div>`;
+    else if (nx) {
+      const alt = left.find((x) => x !== nx && x.kind !== 'homework');
+      now = left.length === 1 ? `<h2 class="choose">Ещё одно, и всё!</h2><div class="opts one">${optCard(nx)}</div>`
+        : `<h2 class="choose">Что дальше? Выбирай:</h2><div class="opts">${optCard(nx)}${alt ? optCard(alt) : ''}</div>`;
     }
-    const brk = nx && nx.kind === 'break' ? bubble('luna', 'happy', `Разминка! ${esc(nx.move || 'Встань и потянись.')} Потом попей воды.`) : '';
-    return shell('today', `${chip}<div class="row" style="justify-content:space-between"><h1>Сегодня</h1><span class="tag green">⏱ ${mins} из ${modeInfo(dy.mode).minutes} мин</span></div>
-      ${brk}${momNote}<div style="max-width:720px">${list}</div><div class="pfoot">${go}</div>
+    return shell('today', `${chip}${momNote}
+      <div class="card prog"><div class="row" style="justify-content:space-between"><b>План на сегодня</b><b>${doneN} из ${real.length}</b></div><div class="pbar"><i style="width:${real.length ? Math.round(doneN / real.length * 100) : 0}%"></i></div>
+      <div class="plist">${list}</div></div>${now}
       <div class="pfoot"><button class="btn soft small" data-go="#/nowant">Сегодня не хочу</button></div>`);
   }
 
@@ -1176,7 +1175,7 @@
     return `<main class="player done-screen"><img class="hero-pic big" src="${esc(src(l.heroWin || l.hero))}" alt="">
       <h1>Страница ${l.book} вернулась в книгу ⭐</h1><p class="sub">${esc(l.title)}: приключение пройдено. В книге ${got} из ${BOOK_PAGES}.</p>
       ${todayN % 2 === 0 ? '<p class="sub">Перерыв 5 минут: попрыгай, попей воды. Потом можно дальше.</p>' : ''}
-      <div class="pfoot"><button class="btn" data-go="#/book">В книгу</button></div></main>`;
+      <div class="pfoot">${day() && day().steps && !day().end ? '<button class="btn" data-go="#/today">Дальше по плану</button>' : '<button class="btn" data-go="#/book">В книгу</button>'}</div></main>`;
   }
   function viewParentBook() {
     const mark = (b) => { const n = b.u + b.r; return n <= 1 ? '🟢 знает' : n <= 4 ? '🟡 путается' : '🔴 дыра'; };
@@ -1598,10 +1597,10 @@
   function route() {
     if (cleanup) { cleanup(); cleanup = null; }
     if (window.speechSynthesis) speechSynthesis.cancel();
-    const [, page, arg] = (location.hash || '#/book').split('/'); // на каникулах первый экран книга героев
+    const [, page, arg] = (location.hash || '#/today').split('/'); // первый экран: «Сегодня» (книга идёт в плане дня)
     // ponytail: сайт только для Киры, имя и миры не спрашиваем (решение 23.10)
     if (!S.name || !S.worlds.length) { S.name = S.name || 'Кира'; if (!S.worlds.length) S.worlds = C.worlds.map((w) => w.id); save(); }
-    if (page === 'onboarding') { location.hash = '#/book'; return; }
+    if (page === 'onboarding') { location.hash = '#/today'; return; }
     if (page !== 'parent' && page !== 'path') parentOk = false;
     if (page === 'lesson') { startLesson(arg); return; }
     if (page === 'review') { startReview(); return; }
@@ -1632,9 +1631,16 @@
       save(); route(); return;
     }
     if (el.dataset.energy) {
-      const dy = S.days[d]; dy.energy = el.dataset.energy;
+      const dy = S.days[d] = Object.assign(S.days[d] || {}, S.days[d] && S.days[d].started ? {} : { mode: modeFor(d), started: Date.now(), active: 0, lastAct: Date.now(), by: S.parent.remindOn === d ? 'mom' : 'kira' });
+      dy.energy = el.dataset.energy;
       const b = buildDay(dy.mode, dy.energy); dy.steps = b.steps; dy.missing = b.missing; dy.notes = b.notes; save(); route(); return;
     }
+    if (el.dataset.pick != null) { // Кира выбрала одно из двух: ставим его первым и идём
+      const dy = S.days[d], st = dy.steps[+el.dataset.pick], nx = nextStepOf(dy);
+      if (st !== nx) { dy.steps.splice(+el.dataset.pick, 1); dy.steps.splice(dy.steps.indexOf(nx), 0, st); }
+      save(); location.hash = st.kind === 'review' ? '#/review' : st.kind === 'practice' ? '#/practice/' + st.skill : '#/lesson/' + st.lesson; return;
+    }
+    if (el.dataset.act === 'hwdone') { const nx = nextStepOf(S.days[d]); if (nx && nx.kind === 'homework') { nx.done = true; nx.at = Date.now(); } save(); closeDayIfNeeded(); route(); return; }
     if (el.dataset.act === 'nextstep') {
       const nx = nextStepOf(S.days[d]); if (!nx) { route(); return; }
       location.hash = nx.kind === 'review' ? '#/review' : nx.kind === 'practice' ? '#/practice/' + nx.skill : '#/lesson/' + nx.lesson; return;

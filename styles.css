@@ -418,3 +418,27 @@ textarea.field { min-height: 110px; resize: vertical; font-weight: 600; }
 :root { --bg: #FFFFFF; --line: #ECE8F7; }
 .card, .bubble, .task-card, .iconbtn { border: 2px solid var(--line); }
 .card, .task-card { box-shadow: 0 6px 18px rgba(80, 60, 180, .08); }
+/* «Сегодня» (24.10): настроение, план, выбор из двух */
+.moods { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; max-width: 640px; margin: 10px auto; }
+.mood { border: 2px solid var(--line); background: #fff; border-radius: 24px; padding: 18px 8px; font-weight: 900; font-size: 18px; display: flex; flex-direction: column; align-items: center; gap: 6px; box-shadow: 0 6px 0 var(--line); }
+.mood .e { font-size: 44px; line-height: 1; }
+.mood:hover { border-color: var(--violet); }
+.prog .pbar { height: 14px; border-radius: 9px; background: var(--violet-l); margin: 10px 0 12px; overflow: hidden; }
+.prog .pbar i { display: block; height: 100%; background: var(--violet); border-radius: 9px; transition: width .4s; }
+.plist { display: flex; flex-direction: column; gap: 6px; }
+.pstep { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 14px; font-size: 17px; }
+.pstep .ic { width: 34px; height: 34px; border-radius: 11px; background: var(--violet-l); display: grid; place-items: center; flex: none; font-size: 18px; }
+.pstep .ic svg { width: 20px; height: 20px; fill: var(--violet-d); }
+.pstep.done { color: var(--muted); } .pstep.done .ok { margin-left: auto; color: var(--green); font-weight: 900; }
+.pstep.now { background: var(--violet-l); outline: 2px solid var(--violet); }
+.choose { margin: 18px 0 10px; }
+.opts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.opts.one { grid-template-columns: minmax(0, 360px); justify-content: center; }
+.opt { position: relative; overflow: hidden; border: 0; border-radius: 26px; min-height: 190px; padding: 16px; text-align: left; color: #fff; display: flex; flex-direction: column; gap: 4px; box-shadow: 0 8px 0 rgba(0, 0, 0, .12); }
+.opt b { font-size: 21px; line-height: 1.15; position: relative; z-index: 1; text-shadow: 0 1px 3px rgba(0, 0, 0, .25); max-width: 70%; }
+.opt small { font-size: 14px; font-weight: 800; opacity: .95; position: relative; z-index: 1; text-shadow: 0 1px 3px rgba(0, 0, 0, .25); }
+.opt img { position: absolute; right: -4px; bottom: -4px; height: 130px; }
+.opt .oi { position: absolute; right: 14px; bottom: 12px; font-size: 54px; line-height: 1; opacity: .9; }
+.opt .oi svg { width: 64px; height: 64px; fill: rgba(255, 255, 255, .85); }
+.opt:active { transform: translateY(3px); }
+@media (max-width: 520px) { .opts { grid-template-columns: 1fr; } .opt { min-height: 150px; } .opt img { height: 112px; } }
