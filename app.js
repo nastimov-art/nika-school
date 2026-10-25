@@ -62,7 +62,7 @@
     try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && s.v === 1) return Object.assign(blankState(), s); } catch (e) { /* пусто */ }
     return blankState();
   }
-  function save() { MCACHE = new Map(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { console.error('Прогресс не сохранился', e); } }
+  function save() { MCACHE = new Map(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { console.error('Прогресс не сохранился', e); } if (C) pushSoon(); }
 
   // ---------- озвучка ----------
   let voices = [];
@@ -480,7 +480,9 @@
     for (const slot of plan) {
       if (slot === 'break' || slot === 'move') { if (steps.length && steps[steps.length - 1].kind !== 'break') steps.push({ kind: 'break', title: 'Разминка', track: 'break', move: pick(C.modes.moves || ['Встань, потянись, попей воды']), done: false }); continue; }
       if (slot === 'main') { pref.some((t) => push(stepFor(t, used))); continue; }
-      if (slot === 'book') { const bl = bookLessons().find((l) => !isDone(l)); if (bl) { used.add(bl.id); steps.push({ kind: 'lesson', lesson: bl.id, title: bl.title, track: 'book', done: false }); } continue; }
+      if (slot === 'book') { // каникулы и выходные: 3 страницы подряд (просьба мамы 25.10), в школьный день одна
+        for (const bl of bookLessons().filter((l) => !isDone(l)).slice(0, mode === 'school' ? 1 : 3)) { used.add(bl.id); steps.push({ kind: 'lesson', lesson: bl.id, title: bl.title, track: 'book', done: false }); }
+        continue; }
       const tid = slot === 'rotate' ? C.modes.rotate[Math.floor(Date.now() / 6048e5) % C.modes.rotate.length] : slot;
       if (!push(stepFor(tid, used))) missing.push(track(tid).title);
     }
@@ -566,6 +568,54 @@
     } catch (e) { /* нет сети или GitHub недоступен: попробуем позже */ }
     flushing = false;
   }
+  // ---------- одна Кира на всех компьютерах ----------
+  // каждый компьютер кладёт свой прогресс в state/<id>.json и при открытии подмешивает чужие
+  const DEV = (() => { try { let id = localStorage.getItem('nika-device'); if (!id) { id = Math.random().toString(36).slice(2, 10); localStorage.setItem('nika-device', id); } return id; } catch (e) { return 'nodev'; } })();
+  const byKey = (a, b, key) => { const m = new Map(); for (const x of [...(a || []), ...(b || [])]) m.set(key(x), x); return [...m.values()]; };
+  const doneN = (dy) => ((dy && dy.steps) || []).filter((x) => x.done).length;
+  function mergeState(o) {
+    if (!o || o.v !== 1) return;
+    S.log = byKey(S.log, o.log, (x) => `${x.t}|${x.lesson}|${x.step}`).sort((a, b) => a.t - b.t).slice(-3000);
+    S.sessions = byKey(S.sessions, o.sessions, (x) => `${x.d}|${x.id}|${x.ms}`);
+    S.adapt = byKey(S.adapt, o.adapt, (x) => x.d + x.text);
+    S.tutor = byKey(S.tutor, o.tutor, (x) => x.id).sort((a, b) => a.t - b.t).slice(-200);
+    for (const [id, l] of Object.entries(o.lessons || {})) { const m = S.lessons[id]; if (!m || (l.done && !m.done) || (l.times || 0) > (m.times || 0)) S.lessons[id] = l; }
+    for (const [id, x] of Object.entries(o.skills || {})) { const m = S.skills[id]; if (!m || (x.lvl || 0) > (m.lvl || 0) || ((x.lvl || 0) === (m.lvl || 0) && (x.due || '') > (m.due || ''))) S.skills[id] = x; }
+    for (const [id, w] of Object.entries(o.words || {})) { const m = S.words[id]; if (!m || (w.due || '') > (m.due || '')) S.words[id] = w; }
+    for (const [d, dy] of Object.entries(o.days || {})) { const m = S.days[d]; if (!m || doneN(dy) > doneN(m) || (!m.energy && dy.energy)) S.days[d] = dy; }
+    S.calendar = Object.assign({}, o.calendar, S.calendar); // ponytail: при споре побеждает этот компьютер; нужна точность, добавить время правки
+    S.clay = Object.assign({}, o.clay, S.clay);
+    if (o.parent) { if (!S.parent.pin) S.parent.pin = o.parent.pin; if (!S.parent.comment) S.parent.comment = o.parent.comment; }
+  }
+  const ghHead = (r, raw) => ({ Authorization: 'Bearer ' + r.token, Accept: raw ? 'application/vnd.github.raw' : 'application/vnd.github+json' });
+  let mySha = null, pushT = null;
+  async function pullState() {
+    const r = C && C.config && C.config.reports;
+    if (!r || !navigator.onLine) return;
+    try {
+      const api = `https://api.github.com/repos/${r.owner}/${r.repo}/contents/state`;
+      const ls = await fetch(api, { headers: ghHead(r), cache: 'no-store' }); if (!ls.ok) return;
+      for (const f of await ls.json()) {
+        if (f.name === DEV + '.json') { mySha = f.sha; continue; }
+        const g = await fetch(`${api}/${f.name}`, { headers: ghHead(r, true), cache: 'no-store' });
+        if (g.ok) mergeState(await g.json());
+      }
+      save();
+    } catch (e) { /* нет сети: работаем с тем, что есть */ }
+  }
+  function pushSoon() { clearTimeout(pushT); pushT = setTimeout(pushState, 3000); }
+  async function pushState() {
+    const r = C && C.config && C.config.reports;
+    if (!r || !navigator.onLine) return;
+    try {
+      const url = `https://api.github.com/repos/${r.owner}/${r.repo}/contents/state/${DEV}.json`;
+      const put = () => fetch(url, { method: 'PUT', headers: ghHead(r), body: JSON.stringify(Object.assign({ message: 'state ' + DEV, content: utf8b64(JSON.stringify(Object.assign({}, S, { outbox: [] }))) }, mySha ? { sha: mySha } : {})) });
+      let res = await put();
+      if (res.status === 409 || res.status === 422) { const g = await fetch(url, { headers: ghHead(r), cache: 'no-store' }); mySha = g.ok ? (await g.json()).sha : null; res = await put(); }
+      if (res.ok) { mySha = (await res.json()).content.sha; S.lastSync = new Date().toISOString(); try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* пусто */ } }
+    } catch (e) { /* попробуем при следующем сохранении */ }
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && C && !P) pullState().then(route); });
   setInterval(() => { if (C) flushOutbox(); }, 5 * 60000);
   window.addEventListener('online', () => { if (C) flushOutbox(); });
 
@@ -1763,7 +1813,7 @@
     if (dy && dy.started && dy.active == null) { dy.active = 0; dy.lastAct = Date.now(); if (dy.timeUp) { delete dy.end; delete dy.timeUp; } }
   }
   document.body.classList.toggle('syll', S.set.syll);
-  unlock().then(loadContent).then((c) => { C = c; pickedWorlds = S.worlds.slice(); route(); flushOutbox(); checkTutor(); })
+  unlock().then(loadContent).then(async (c) => { C = c; pickedWorlds = S.worlds.slice(); await Promise.race([pullState(), new Promise((r) => setTimeout(r, 6000))]); route(); flushOutbox(); checkTutor(); })
     .catch((e) => { app.innerHTML = `<div class="boot">Не получилось загрузить уроки. Проверь интернет и обнови страницу.<br><small>${esc(e.message)}</small></div>`; });
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     // новая версия сайта встала: перезагружаем сразу, а не со второго открытия (но не посреди задания)
