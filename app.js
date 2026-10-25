@@ -6,7 +6,6 @@
   const LV = ['🔒', '🌱', '🌿', '🌳', '⭐', '🚀']; // текстовые места (кабинет мамы, отчёты)
   const ic = (n) => `<span class="ic">${window.ICONS[n] || ''}</span>`;
   const LVI = ['lock', 'plant', 'leaf', 'tree', 'star', 'rocket-launch'].map(ic); // экраны Киры
-  const OPTC = { book: '#7B61FF', reading: '#7B61FF', math: '#2FA86A', russian: '#E8588C', english: '#3D8FE0', world: '#2A9D84', logic: '#E8902A', words: '#F07A35', review: '#8E7CF0', create: '#B65FD6', feelings: '#E8902A' }; // яркие цвета карточек выбора (белый текст)
   const TI = { review: 'repeat', break: 'person-simple-run', explore: 'binoculars', code: 'robot', music: 'music-notes', feelings: 'heart', reading: 'book-open-text', math: 'calculator', russian: 'pencil-simple-line', words: 'text-aa', english: 'headphones', world: 'globe-hemisphere-west', logic: 'puzzle-piece', create: 'paint-brush', homework: 'camera' };
   const LVT = ['пока закрыто', 'начала', 'учусь', 'получается', 'освоила', 'готова дальше'];
   const BOX_DAYS = [0, 1, 3, 7, 21]; // коробки повторения: завтра, 3 дня, неделя, 3 недели
@@ -653,7 +652,7 @@
     const optCard = (x) => {
       const l = x.lesson && C.lessons.find((q) => q.id === x.lesson), heroImg = l && l.hero ? `<img src="${esc(src(l.hero))}" alt="">` : `<span class="oi">${stepIcon(x)}</span>`;
       const sub = x.track === 'book' ? `Книга героев, страница ${l.book}` : x.kind === 'review' ? 'вспоминаем старое' : track(x.track).title;
-      return `<button class="opt" style="background:${OPTC[x.track] || '#7B61FF'}" data-pick="${dy.steps.indexOf(x)}"><b>${esc(x.title)}</b><small>${esc(sub)}</small>${heroImg}</button>`;
+      return `<button class="opt" style="background:${x.track === 'book' ? '#EDE7FF' : track(x.track).color}" data-pick="${dy.steps.indexOf(x)}"><b>${esc(x.title)}</b><small>${esc(sub)}</small>${heroImg}</button>`;
     };
     let now = '';
     if (nx && nx.kind === 'break') now = `${bubble('nika', 'happy', `Перерыв! ${esc((nx.move || 'Встань и потянись').replace(/[.!]?$/, '.'))} Потом попей воды.`)}<div class="pfoot"><button class="btn green" data-act="breakdone">${ic('person-simple-run')} Сделала, дальше</button></div>`;
