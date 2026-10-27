@@ -594,13 +594,13 @@
     if (!r || !navigator.onLine) return;
     try {
       const api = `https://api.github.com/repos/${r.owner}/${r.repo}/contents/state`;
-      const ls = await fetch(api, { headers: ghHead(r), cache: 'no-store' }); if (!ls.ok) return;
+      const ls = await fetch(api, { headers: ghHead(r), cache: 'no-store' }); if (!ls.ok) { if (ls.status === 404) pushSoon(); return; } // папки ещё нет: этот компьютер первый
       for (const f of await ls.json()) {
         if (f.name === DEV + '.json') { mySha = f.sha; continue; }
         const g = await fetch(`${api}/${f.name}`, { headers: ghHead(r, true), cache: 'no-store' });
         if (g.ok) mergeState(await g.json());
       }
-      save();
+      save(); // save() сам отправит прогресс: компьютер со старыми занятиями выкладывает их сразу при входе
     } catch (e) { /* нет сети: работаем с тем, что есть */ }
   }
   function pushSoon() { clearTimeout(pushT); pushT = setTimeout(pushState, 3000); }
