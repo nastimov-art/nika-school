@@ -185,7 +185,10 @@
   const skillOpen = (s) => S.parent.unlockAll || s.deps.every((d) => lvl(d) >= 3);
   const lessonsOf = (sid) => C.lessons.filter((l) => l.skill === sid && !l.book); // книга героев идёт своим порядком
   const bookLessons = () => C.lessons.filter((l) => l.book).sort((a, b) => a.book - b.book);
-  const isDone = (l) => !!(S.lessons[l.id] && S.lessons[l.id].done);
+  // страницы 16-25 были пройдены наугад 29.10.2026: считаются собранными, только если пройдены заново (redo)
+  const REDO_FROM = 16;
+  const needsRedo = (l) => !!(l.book >= REDO_FROM && S.lessons[l.id] && S.lessons[l.id].done && !S.lessons[l.id].redo);
+  const isDone = (l) => !!(S.lessons[l.id] && S.lessons[l.id].done) && !needsRedo(l);
   function lessonOpen(l) {
     if (l.book) return true;
     const s = skillOf(l);
@@ -1027,13 +1030,14 @@
 
   function wrong(err) {
     const ts = P.ts; ts.wrongs++; P.wrongs++;
+    const fast = !!P.lesson.book && Date.now() - (ts.tLast || ts.t0 || 0) < 3000; ts.tLast = Date.now(); // ответ быстрее 3 секунд после начала или прошлой ошибки
     if (err) ts.errs.push(err);
     const same = ts.errs.length >= 2 && ts.errs[ts.errs.length - 1] === ts.errs[ts.errs.length - 2];
     const auto = ts.wrongs >= 2 && ts.hints === 0 && !same;
     if (auto) ts.hints = 1, P.hints++;
     if (same) { ts.react = react('same_error_twice'); ts.menu = true; }
-    renderPlayer(`<div class="feedback soft"><div class="in">${Chars.html('nika', 'support', 'sm')}<div class="msg">${esc(pick(WRONG))}${auto ? '<div class="why">Я открыла подсказку ниже.</div>' : ''}</div></div></div>`);
-    const fb = document.querySelector('.feedback'); setTimeout(() => fb && fb.remove(), 1700);
+    renderPlayer(`<div class="feedback soft"><div class="in">${Chars.html('nika', 'support', 'sm')}<div class="msg">${esc(fast ? 'Ого, как быстро! Похоже, ты нажала не читая. Выдохни и прочитай задание ещё раз, не торопись.' : pick(WRONG))}${auto ? '<div class="why">Я открыла подсказку ниже.</div>' : ''}</div></div></div>`);
+    const fb = document.querySelector('.feedback'); setTimeout(() => fb && fb.remove(), fast ? 4000 : 1700);
   }
   function solved() {
     const t = P.steps[P.i], ts = P.ts; ts.solved = true;
@@ -1065,7 +1069,7 @@
       const id = P.lesson.skill, s = sk(id);
       if (P.mode === 'lesson') {
         const l = P.lesson, prev = S.lessons[l.id] || { times: 0 };
-        S.lessons[l.id] = { done: true, at: today(), times: prev.times + 1, wrongs: P.wrongs, hints: P.hints };
+        S.lessons[l.id] = { done: true, at: today(), times: prev.times + 1, wrongs: P.wrongs, hints: P.hints, redo: true };
         if (l.book) S.lessons[l.id].bk = bookScore(r);
         for (const st of l.steps) if (st.type === 'words') for (const w of st.ids) if (!S.words[w]) S.words[w] = { box: 1, due: addDays(1) };
       }
@@ -1199,7 +1203,8 @@
       const inner = ok ? `${i + 1}<span class="st">${stars(l)}</span>` : now ? i + 1 : '🔒';
       return `<button class="node ${ok ? 'got' : now ? 'now' : 'lock'}" style="left:${x}%;top:${y}px" ${ok || now ? `data-go="#/lesson/${l.id}"` : 'disabled'} aria-label="Страница ${i + 1}">${inner}</button>`;
     }).join('');
-    const hi = got ? `Уже ${got} ${plural(got, ['страница', 'страницы', 'страниц'])}. Герои ждут!`
+    const redoN = ls.filter(needsRedo).length;
+    const hi = redoN ? `Стоп! Мы раскрыли обман: последние ${redoN} ${plural(redoN, ['страницу', 'страницы', 'страниц'])} ты проходила, не читая, просто тыкала. Страницы обиделись и улетели из книги. Пройди их ещё раз внимательно, и они вернутся. Тогда придут и Хантрикс.` : got ? `Уже ${got} ${plural(got, ['страница', 'страницы', 'страниц'])}. Герои ждут!`
       : 'Беда! В моей волшебной книге перепутались страницы. Герои попали не в свои истории. Каждое приключение возвращает одну страницу. Поможешь?';
     return shell('book', `<div class="hello">${Chars.html('nika', 'happy')}<div class="bubble">${hi}</div></div>
       <div class="card"><h2>Книга героев</h2><p class="sub">Собрано ${got} из ${BOOK_PAGES}</p>
@@ -1234,7 +1239,8 @@
       <table class="ptable"><tr><th>Тема</th><th>Итог</th><th>Почему</th></tr>`;
     for (const l of bookLessons()) {
       const st = S.lessons[l.id], b = st && st.bk, name = `${l.book}. ${esc(l.subj)}: ${esc(l.title)}`;
-      h += b ? `<tr><td>${name}</td><td>${mark(b)}</td><td>${why(b)}<div class="muted small">в задании ${b.u}, в правиле ${b.r}${b.read ? `, просила прочитать ${b.read}` : ''} · ${fmtDay(st.at)}</div></td></tr>`
+      h += b && needsRedo(l) ? `<tr><td>${name}</td><td>🔄 пересдача</td><td>Первый раз пройдена наугад (ответы быстрее 3-5 секунд), результат не считаем. ${fmtDay(st.at)}</td></tr>`
+        : b ? `<tr><td>${name}</td><td>${mark(b)}</td><td>${why(b)}<div class="muted small">в задании ${b.u}, в правиле ${b.r}${b.read ? `, просила прочитать ${b.read}` : ''} · ${fmtDay(st.at)}</div></td></tr>`
         : `<tr><td>${name}</td><td class="muted">не проходила</td><td></td></tr>`;
     }
     return h + `</table><p class="muted small">Тем в книге сейчас ${bookLessons().length} из ${BOOK_PAGES}. Остальные добавит Claude.</p></div>
