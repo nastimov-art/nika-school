@@ -186,7 +186,7 @@
   const lessonsOf = (sid) => C.lessons.filter((l) => l.skill === sid && !l.book); // книга героев идёт своим порядком
   const bookLessons = () => C.lessons.filter((l) => l.book).sort((a, b) => a.book - b.book);
   // страницы 16-25 были пройдены наугад 29.10.2026: считаются собранными, только если пройдены заново (redo)
-  const REDO_FROM = 16;
+  const REDO_FROM = 16, REDO_START = '2026-10-30'; // пересдача со следующего дня: 29.10 заданий уже хватит
   const needsRedo = (l) => !!(l.book >= REDO_FROM && S.lessons[l.id] && S.lessons[l.id].done && !S.lessons[l.id].redo);
   const isDone = (l) => !!(S.lessons[l.id] && S.lessons[l.id].done) && !needsRedo(l);
   function lessonOpen(l) {
@@ -485,7 +485,7 @@
       if (slot === 'break' || slot === 'move') { if (steps.length && steps[steps.length - 1].kind !== 'break') steps.push({ kind: 'break', title: 'Разминка', track: 'break', move: pick(C.modes.moves || ['Встань, потянись, попей воды']), done: false }); continue; }
       if (slot === 'main') { pref.some((t) => push(stepFor(t, used))); continue; }
       if (slot === 'book') { // каникулы и выходные: 3 страницы подряд (просьба мамы 25.10), в школьный день одна
-        for (const bl of bookLessons().filter((l) => !isDone(l)).slice(0, mode === 'school' ? 1 : 3)) { used.add(bl.id); steps.push({ kind: 'lesson', lesson: bl.id, title: bl.title, track: 'book', done: false }); }
+        for (const bl of bookLessons().filter((l) => !isDone(l) && !(needsRedo(l) && today() < REDO_START)).slice(0, mode === 'school' ? 1 : 3)) { used.add(bl.id); steps.push({ kind: 'lesson', lesson: bl.id, title: bl.title, track: 'book', done: false }); }
         continue; }
       const tid = slot === 'rotate' ? C.modes.rotate[Math.floor(Date.now() / 6048e5) % C.modes.rotate.length] : slot;
       if (!push(stepFor(tid, used))) missing.push(track(tid).title);
@@ -1201,16 +1201,16 @@
     const nodes = pts.map(([x, y], i) => {
       const l = ls.find((q) => q.book === i + 1), ok = l && isDone(l), now = l && l === next;
       const inner = ok ? `${i + 1}<span class="st">${stars(l)}</span>` : now ? i + 1 : '🔒';
-      return `<button class="node ${ok ? 'got' : now ? 'now' : 'lock'}" style="left:${x}%;top:${y}px" ${ok || now ? `data-go="#/lesson/${l.id}"` : 'disabled'} aria-label="Страница ${i + 1}">${inner}</button>`;
+      return `<button class="node ${ok ? 'got' : now ? 'now' : 'lock'}" style="left:${x}%;top:${y}px" ${ok || (now && !(needsRedo(l) && today() < REDO_START)) ? `data-go="#/lesson/${l.id}"` : 'disabled'} aria-label="Страница ${i + 1}">${inner}</button>`;
     }).join('');
     const redoN = ls.filter(needsRedo).length;
-    const hi = redoN ? `Стоп! Мы раскрыли обман: последние ${redoN} ${plural(redoN, ['страницу', 'страницы', 'страниц'])} ты проходила, не читая, просто тыкала. Страницы обиделись и улетели из книги. Пройди их ещё раз внимательно, и они вернутся. Тогда придут и Хантрикс.` : got ? `Уже ${got} ${plural(got, ['страница', 'страницы', 'страниц'])}. Герои ждут!`
+    const hi = redoN ? `Молодец, ты уже сделала много, и первые 15 страниц прошла честно и внимательно! Но мы раскрыли обман: последние ${redoN} ${plural(redoN, ['страницу', 'страницы', 'страниц'])} ты проходила, не читая, просто тыкала. Страницы обиделись и улетели из книги. ${today() < REDO_START ? 'На сегодня хватит, отдыхай. Завтра' : 'Теперь'} пройди их ещё раз внимательно, и они вернутся. Тогда придут и Хантрикс.` : got ? `Уже ${got} ${plural(got, ['страница', 'страницы', 'страниц'])}. Герои ждут!`
       : 'Беда! В моей волшебной книге перепутались страницы. Герои попали не в свои истории. Каждое приключение возвращает одну страницу. Поможешь?';
     return shell('book', `<div class="hello">${Chars.html('nika', 'happy')}<div class="bubble">${hi}</div></div>
       <div class="card"><h2>Книга героев</h2><p class="sub">Собрано ${got} из ${BOOK_PAGES}</p>
       <div class="heroes">${BOOK_HEROES.map((p) => `<span class="hero-dot"><img src="${esc(src(p))}" alt=""></span>`).join('')}${next ? '<span class="hero-dot lock" title="Хантрикс">🎤</span>' : HUNT.map((p) => `<span class="hero-dot"><img src="${esc(src(p))}" alt=""></span>`).join('')}</div>
       ${next ? '<p class="muted small">Соберёшь всю книгу, и придут Хантрикс 🔒</p>' : `<img class="hunt-trio" src="${esc(src('private/heroes/hunt-trio.png'))}" alt=""><p class="sub">Ура! Все ${BOOK_PAGES} страниц вернулись в книгу! Пришли Хантрикс: Руми, Мира и Зои. Теперь они будут появляться и в других книгах.</p>`}
-      ${next ? `<div class="pfoot"><button class="btn green" data-go="#/lesson/${next.id}">${got ? 'Следующее приключение' : 'Начать приключение'}</button></div>` : '<p class="sub">Все приключения пройдены!</p>'}</div>
+      ${next && needsRedo(next) && today() < REDO_START ? '<p class="sub">На сегодня хватит. Продолжим завтра 🌙</p>' : next ? `<div class="pfoot"><button class="btn green" data-go="#/lesson/${next.id}">${got ? 'Следующее приключение' : 'Начать приключение'}</button></div>` : '<p class="sub">Все приключения пройдены!</p>'}</div>
       <div class="trailbox" style="height:${shown * 96}px">${line}${nodes}</div>
       ${shown < BOOK_PAGES ? `<p class="muted small" style="text-align:center">Дальше ещё ${BOOK_PAGES - shown} ${plural(BOOK_PAGES - shown, ['страница', 'страницы', 'страниц'])}</p>` : ''}
       ${got ? `<p class="muted small" style="text-align:center">Код для мамы: ${bookCode()}</p>` : ''}`);
