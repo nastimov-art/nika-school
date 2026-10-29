@@ -25,6 +25,7 @@
     ['💎', 'Настоящая малина', 'Если первые понравились', 'https://www.youtube.com/watch?v=4M75F5iN1m0', 'рус.', 'https://rutube.ru/video/b3e7c36d8ee15f22ff0a74616bc7bf1d/'],
     ['🐈', 'Гарфилд', 'Сюрприз: любимый кот из мультика', '', '', 'https://rutube.ru/video/bc23c3f2e5dbc7b1da25b82850974336/']
   ];
+  const HUNT = ['private/heroes/rumi.png', 'private/heroes/mira.png', 'private/heroes/zoey.png']; // Хантрикс: открываются, когда собрана вся книга
   const BOOK_HEROES = ['private/heroes/ladybug.png', 'private/heroes/noir.png', 'private/heroes/garfield-idea.png', 'private/heroes/harry.png'];
   const HINT_LABELS = ['Скажу проще', 'Подсказка', 'Пример', 'По шагам', 'Попробуй полегче'];
   const GENERIC_HINTS = ['Прочитай задание ещё раз медленно, по слогам.', 'Ответ прячется в тексте или на картинке. Найди нужное место пальцем.'];
@@ -1202,8 +1203,8 @@
       : 'Беда! В моей волшебной книге перепутались страницы. Герои попали не в свои истории. Каждое приключение возвращает одну страницу. Поможешь?';
     return shell('book', `<div class="hello">${Chars.html('nika', 'happy')}<div class="bubble">${hi}</div></div>
       <div class="card"><h2>Книга героев</h2><p class="sub">Собрано ${got} из ${BOOK_PAGES}</p>
-      <div class="heroes">${BOOK_HEROES.map((p) => `<span class="hero-dot"><img src="${esc(src(p))}" alt=""></span>`).join('')}<span class="hero-dot lock" title="Хантрикс">🎤</span></div>
-      <p class="muted small">Соберёшь всю книгу, и придут Хантрикс 🔒</p>
+      <div class="heroes">${BOOK_HEROES.map((p) => `<span class="hero-dot"><img src="${esc(src(p))}" alt=""></span>`).join('')}${next ? '<span class="hero-dot lock" title="Хантрикс">🎤</span>' : HUNT.map((p) => `<span class="hero-dot"><img src="${esc(src(p))}" alt=""></span>`).join('')}</div>
+      ${next ? '<p class="muted small">Соберёшь всю книгу, и придут Хантрикс 🔒</p>' : `<img class="hunt-trio" src="${esc(src('private/heroes/hunt-trio.png'))}" alt=""><p class="sub">Ура! Все ${BOOK_PAGES} страниц вернулись в книгу! Пришли Хантрикс: Руми, Мира и Зои. Теперь они будут появляться и в других книгах.</p>`}
       ${next ? `<div class="pfoot"><button class="btn green" data-go="#/lesson/${next.id}">${got ? 'Следующее приключение' : 'Начать приключение'}</button></div>` : '<p class="sub">Все приключения пройдены!</p>'}</div>
       <div class="trailbox" style="height:${shown * 96}px">${line}${nodes}</div>
       ${shown < BOOK_PAGES ? `<p class="muted small" style="text-align:center">Дальше ещё ${BOOK_PAGES - shown} ${plural(BOOK_PAGES - shown, ['страница', 'страницы', 'страниц'])}</p>` : ''}
